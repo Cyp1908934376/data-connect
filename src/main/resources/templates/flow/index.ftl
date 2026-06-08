@@ -43,8 +43,8 @@
                         <td>
                             <div class="btn-group-ops">
                                 <a href="/flow/wizard?id=${f.id}" class="btn-edit"><i class="bi bi-pencil-square"></i> 编辑</a>
-                                <button class="btn btn-outline-success btn-execute-flow" data-flow-id="${f.id}">执行</button>
-                                <button class="btn btn-outline-info btn-log-flow" data-flow-id="${f.id}" data-flow-name="${f.name}"><i class="bi bi-journal-text"></i> 日志</button>
+                                <button class="btn-execute btn-execute-flow" data-flow-id="${f.id}"><i class="bi bi-play-fill"></i> 执行</button>
+                                <button class="btn-log btn-log-flow" data-flow-id="${f.id}" data-flow-name="${f.name}"><i class="bi bi-journal-text"></i> 日志</button>
                                 <form method="post" action="/flow/delete/${f.id}" style="display:inline" onsubmit="return confirm('确定删除？')">
                                     <button type="submit" class="btn-delete"><i class="bi bi-trash"></i> 删除</button>
                                 </form>
@@ -114,7 +114,7 @@ $('.btn-execute-flow').on('click', function() {
     if (!confirm('确定执行此流程？')) return;
 
     var loading = showLoading('正在执行数据对接...', '数据量较大时可能需要较长时间，请耐心等待');
-    $btn.prop('disabled', true).text('执行中...');
+    $btn.prop('disabled', true).html('<i class="bi bi-hourglass-split"></i> 执行中...');
 
     $.post('/flow/api/execute', { flowConfigId: flowId }, function(res) {
         loading.close();
@@ -130,7 +130,7 @@ $('.btn-execute-flow').on('click', function() {
         try { var err = JSON.parse(xhr.responseText); msg = err.message || msg; } catch(e) {}
         showError(msg, { title: '执行异常' });
     }).always(function() {
-        $btn.prop('disabled', false).text('执行');
+        $btn.prop('disabled', false).html('<i class="bi bi-play-fill"></i> 执行');
     });
 });
 

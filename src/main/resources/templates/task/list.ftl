@@ -40,12 +40,12 @@
                             <div class="btn-group-ops">
                                 <a href="/task/form?id=${t.id}" class="btn-edit"><i class="bi bi-pencil-square"></i> 编辑</a>
                                 <#if t.status != 'RUNNING'>
-                                    <button class="btn btn-outline-success btn-ajax-action" data-url="/task/api/start/${t.id}">启动</button>
+                                    <button class="btn-start btn-ajax-action" data-url="/task/api/start/${t.id}"><i class="bi bi-play-fill"></i> 启动</button>
                                 <#else>
-                                    <button class="btn btn-outline-warning btn-ajax-action" data-url="/task/api/pause/${t.id}">暂停</button>
-                                    <button class="btn btn-outline-danger btn-ajax-action" data-url="/task/api/stop/${t.id}" data-confirm="确定停止任务？">停止</button>
+                                    <button class="btn-pause btn-ajax-action" data-url="/task/api/pause/${t.id}"><i class="bi bi-pause-fill"></i> 暂停</button>
+                                    <button class="btn-stop btn-ajax-action" data-url="/task/api/stop/${t.id}" data-confirm="确定停止任务？"><i class="bi bi-stop-fill"></i> 停止</button>
                                 </#if>
-                                <button class="btn btn-outline-info btn-ajax-action" data-url="/task/api/executeOnce/${t.id}">立即执行</button>
+                                <button class="btn-execute-now btn-ajax-action" data-url="/task/api/executeOnce/${t.id}"><i class="bi bi-lightning-fill"></i> 立即执行</button>
                                 <form method="post" action="/task/delete/${t.id}" style="display:inline" onsubmit="return confirm('确定删除？')">
                                     <button type="submit" class="btn-delete"><i class="bi bi-trash"></i> 删除</button>
                                 </form>

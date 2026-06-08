@@ -72,6 +72,11 @@
                     <li class="breadcrumb-item active">${pageTitle!title}</li>
                 </ol>
             </nav>
+            <div class="ms-auto">
+                <a href="/logout" class="btn btn-sm btn-outline-danger" title="退出登录">
+                    <i class="bi bi-box-arrow-right"></i>
+                </a>
+            </div>
         </header>
 
         <!-- 内容区 -->
