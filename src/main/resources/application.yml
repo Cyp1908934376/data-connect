@@ -1,0 +1,89 @@
+server:
+  port: 8080
+  tomcat:
+    uri-encoding: UTF-8
+  servlet:
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force: true
+
+spring:
+  application:
+    name: data-connect
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.neo4j.Neo4jAutoConfiguration
+  # H2 嵌入式数据库 - 文件模式，数据持久化到 ./data 目录
+  datasource:
+    url: jdbc:h2:file:./data/dataconnect;AUTO_SERVER=TRUE;MODE=MySQL;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+  # JPA
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      ddl-auto: none
+    show-sql: false
+    properties:
+      hibernate:
+        connection:
+          CharSet: UTF-8
+          characterEncoding: UTF-8
+          useUnicode: true
+  # H2 Web Console (开发调试用, 正式环境可关闭)
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+  # FreeMarker
+  freemarker:
+    template-loader-path: classpath:/templates/
+    suffix: .ftl
+    cache: false
+    charset: UTF-8
+    check-template-location: true
+    expose-request-attributes: true
+    expose-session-attributes: true
+    settings:
+      datetime_format: yyyy-MM-dd HH:mm:ss
+      date_format: yyyy-MM-dd
+      time_format: HH:mm:ss
+      number_format: 0.######
+  # 初始化数据库
+  sql:
+    init:
+      mode: always
+      encoding: UTF-8
+      schema-locations: classpath:schema.sql
+      data-locations: classpath:data.sql
+
+logging:
+  level:
+    root: WARN
+    com.dataconnect: INFO
+    # Spring Boot startup
+    org.springframework.boot: INFO
+    # Web request mapping
+    org.springframework.web: INFO
+    org.springframework.web.servlet: INFO
+    # Embedded Tomcat
+    org.apache.catalina: INFO
+    org.apache.coyote: INFO
+    # HikariCP connection pool
+    com.zaxxer.hikari: INFO
+    # Hibernate SQL (set to DEBUG to see SQL statements)
+    org.hibernate.SQL: WARN
+    org.hibernate.type.descriptor.sql.BasicBinder: WARN
+    # OkHttp
+    okhttp3: INFO
+  file:
+    path: ./logs
+  # Pattern for console output (colored with ANSI)
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %highlight(%-5level) [%thread] %cyan(%logger{36}) - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n"

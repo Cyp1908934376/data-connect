@@ -1,0 +1,32 @@
+# Maven
+target/
+
+# IDE
+.idea/
+*.iml
+.fastRequest/
+
+# Data
+data/
+*.mv.db
+*.lock.db
+*.sqlite
+
+# Logs
+logs/
+
+# Backup
+.backup/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp
+temp/
+*.log
+identifier.sqlite
+
+# Claude
+.claude/settings.local.json
+.claude/scheduled_tasks.json
