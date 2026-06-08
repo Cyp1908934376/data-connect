@@ -115,24 +115,6 @@
 </div>
 
 <script>
-// 确保通知函数可用（兼容 app.js 缓存未更新的情况）
-if (typeof showMessage === 'undefined') {
-    function showMessage(msg, type, options) {
-        type = type || 'info'; options = options || {};
-        var icons = {success:'\u2713',error:'\u2717',warning:'\u26a0',info:'\u2139'};
-        var $c = $('#messageArea');
-        if (!$c.length) { $c = $('<div id="messageArea" class="notification-container"></div>').appendTo('body'); }
-        var $item = $('<div class="notification-item notification-'+type+'"><span class="notification-icon">'+(icons[type]||icons.info)+'</span><div class="notification-content">'+(options.title?'<div class="notification-title">'+options.title+'</div>':'')+'<div class="notification-message">'+msg+'</div></div><button class="notification-close">&times;</button></div>');
-        $c.append($item);
-        $item.find('.notification-close').on('click',function(){ $item.remove(); });
-        var dur = options.duration; if (dur===undefined) dur = type==='error'?5000:3000;
-        if (dur>0) { setTimeout(function(){ $item.fadeOut(function(){ $(this).remove(); }); }, dur); }
-    }
-    function showSuccess(msg, opt) { showMessage(msg, 'success', opt); }
-    function showError(msg, opt) { showMessage(msg, 'error', opt); }
-    function showWarning(msg, opt) { showMessage(msg, 'warning', opt); }
-    function showInfo(msg, opt) { showMessage(msg, 'info', opt); }
-}
 // All column configs data for dropdown options
 var allColumnConfigData = {};
 <#if columnConfigs??>

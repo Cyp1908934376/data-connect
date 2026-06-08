@@ -10,6 +10,4 @@ import java.util.List;
 public interface TaskConfigRepository extends JpaRepository<TaskConfig, Long> {
 
     List<TaskConfig> findByStatus(String status);
-
-    List<TaskConfig> findByNameContaining(String keyword);
 }

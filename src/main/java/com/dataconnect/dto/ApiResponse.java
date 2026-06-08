@@ -13,24 +13,9 @@ public class ApiResponse<T> {
         return r;
     }
 
-    public static <T> ApiResponse<T> success(String message, T data) {
-        ApiResponse<T> r = new ApiResponse<>();
-        r.code = 0;
-        r.message = message;
-        r.data = data;
-        return r;
-    }
-
     public static <T> ApiResponse<T> error(String message) {
         ApiResponse<T> r = new ApiResponse<>();
         r.code = -1;
-        r.message = message;
-        return r;
-    }
-
-    public static <T> ApiResponse<T> error(int code, String message) {
-        ApiResponse<T> r = new ApiResponse<>();
-        r.code = code;
         r.message = message;
         return r;
     }

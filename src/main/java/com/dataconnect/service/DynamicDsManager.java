@@ -51,10 +51,6 @@ public class DynamicDsManager {
         }
     }
 
-    public DataSource get(Long dsId) {
-        return dataSourceMap.get(dsId);
-    }
-
     @PreDestroy
     public void closeAll() {
         log.info("应用关闭, 正在释放所有连接池, count={}", dataSourceMap.size());

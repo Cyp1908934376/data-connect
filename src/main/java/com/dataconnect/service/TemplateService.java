@@ -12,7 +12,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -108,10 +107,6 @@ public class TemplateService {
         return versionRepository.findByTemplateIdOrderByVersionDesc(templateId);
     }
 
-    public Optional<TemplateVersion> getVersion(Long versionId) {
-        return versionRepository.findById(versionId);
-    }
-
     public TemplateEntity rollback(Long templateId, Long versionId) {
         log.info("回滚模板, templateId={}, versionId={}", templateId, versionId);
         TemplateVersion version = versionRepository.findById(versionId)
@@ -136,14 +131,6 @@ public class TemplateService {
     }
 
     // === 分类管理 ===
-    public List<TemplateCategory> listCategories() {
-        return categoryRepository.findByParentIdOrderBySortOrder(0L);
-    }
-
-    public List<TemplateCategory> listSubCategories(Long parentId) {
-        return categoryRepository.findByParentIdOrderBySortOrder(parentId);
-    }
-
     public List<TemplateCategory> getAllCategories() {
         return categoryRepository.findAll();
     }

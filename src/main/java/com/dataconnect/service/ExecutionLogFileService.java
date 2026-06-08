@@ -55,18 +55,6 @@ public class ExecutionLogFileService {
     }
 
     /**
-     * Delete watermark for a flow (used when resetting).
-     */
-    public void deleteWatermark(Long flowConfigId) {
-        try {
-            Files.deleteIfExists(getWatermarkPath(flowConfigId));
-            log.info("水位线已删除, flowConfigId={}", flowConfigId);
-        } catch (IOException e) {
-            log.warn("删除水位线文件失败, flowConfigId={}", flowConfigId, e);
-        }
-    }
-
-    /**
      * Write execution log to a timestamped JSON file.
      */
     public String writeExecutionLog(Long flowConfigId, Map<String, Object> executionData) {

@@ -10,6 +10,4 @@ import java.util.List;
 public interface TemplateSnippetRepository extends JpaRepository<TemplateSnippet, Long> {
 
     List<TemplateSnippet> findAllByOrderByGroupNameAscSortOrderAsc();
-
-    List<TemplateSnippet> findByGroupNameOrderBySortOrderAsc(String groupName);
 }

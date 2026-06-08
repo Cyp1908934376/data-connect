@@ -10,6 +10,4 @@ import java.util.List;
 public interface TaskExecutionLogRepository extends JpaRepository<TaskExecutionLog, Long> {
 
     List<TaskExecutionLog> findByTaskIdOrderByCreateTimeDesc(Long taskId);
-
-    TaskExecutionLog findTopByTaskIdOrderByCreateTimeDesc(Long taskId);
 }

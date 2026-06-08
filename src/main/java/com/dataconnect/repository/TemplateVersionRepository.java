@@ -10,6 +10,4 @@ import java.util.List;
 public interface TemplateVersionRepository extends JpaRepository<TemplateVersion, Long> {
 
     List<TemplateVersion> findByTemplateIdOrderByVersionDesc(Long templateId);
-
-    TemplateVersion findTopByTemplateIdOrderByVersionDesc(Long templateId);
 }
