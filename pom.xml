@@ -245,7 +245,6 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
-                    <classpathIndex>true</classpathIndex>
                     <excludes>
                         <exclude>
                             <groupId>org.projectlombok</groupId>
