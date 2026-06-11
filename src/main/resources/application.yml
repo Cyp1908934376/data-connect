@@ -62,11 +62,33 @@ spring:
       schema-locations: classpath:schema.sql
       data-locations: classpath:data.sql
 
-# 应用认证配置
+# 应用配置
 app:
+  driver:
+    # 外部驱动目录，PropertiesLauncher 会从该目录加载 JDBC 驱动 jar
+    path: drivers/
+    # Maven 仓库镜像地址（逗号分隔，下载时可选）
+    maven-urls: https://repo1.maven.org/maven2,https://maven.aliyun.com/repository/central,https://mirrors.tuna.tsinghua.edu.cn/maven2
+  # H2 数据库文件目录（相对于 jar 运行目录）
+  data-dir: data/
   auth:
     # 是否启用登录认证，开发模式可设为 false
-    enabled: true
+    enabled: false
+
+# Knife4j API 接口文档配置
+knife4j:
+  enable: true
+  setting:
+    language: zh-CN
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
+  group-configs:
+    - group: default
+      paths-to-match: /**
 
 logging:
   level:

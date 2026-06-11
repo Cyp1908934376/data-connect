@@ -330,3 +330,21 @@ function formatDuration(ms) {
     if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
     return Math.floor(ms / 60000) + 'm ' + Math.floor((ms % 60000) / 1000) + 's';
 }
+
+function restartApp() {
+    if (!confirm('确认重启应用？重启过程中服务暂时不可用，约 5 秒后恢复。')) return;
+    $.ajax({
+        url: '/api/restart',
+        type: 'POST'
+    }).done(function(res) {
+        if (res.code === 0) {
+            showSuccess(res.data || '应用正在重启...');
+            // 5 秒后自动刷新
+            setTimeout(function() { location.reload(); }, 5000);
+        } else {
+            showError(res.message);
+        }
+    }).fail(function() {
+        showError('重启请求失败');
+    });
+}

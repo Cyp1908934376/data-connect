@@ -42,6 +42,11 @@
                 </a>
             </li>
             <li class="nav-item">
+                <a class="nav-link ${(activeMenu=='driver')?string('active','')}" href="/driver/list">
+                    <i class="bi bi-box-seam"></i> 驱动管理
+                </a>
+            </li>
+            <li class="nav-item">
                 <a class="nav-link ${(activeMenu=='template')?string('active','')}" href="/template/list">
                     <i class="bi bi-file-earmark-code"></i> 模板管理
                 </a>
@@ -77,7 +82,13 @@
                     <li class="breadcrumb-item active">${pageTitle!title}</li>
                 </ol>
             </nav>
-            <div class="ms-auto">
+            <div class="ms-auto d-flex align-items-center gap-2">
+                <a href="/doc.html" target="_blank" class="btn btn-sm btn-outline-info" title="API 接口文档">
+                    <i class="bi bi-file-earmark-text"></i>
+                </a>
+                <button class="btn btn-sm btn-outline-warning" onclick="restartApp()" title="重启应用">
+                    <i class="bi bi-arrow-clockwise"></i> 重启
+                </button>
                 <a href="/logout" class="btn btn-sm btn-outline-danger" title="退出登录">
                     <i class="bi bi-box-arrow-right"></i>
                 </a>

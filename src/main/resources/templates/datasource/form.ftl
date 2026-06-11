@@ -60,7 +60,6 @@ extraJs=["/static/codemirror/codemirror.min.js", "/static/codemirror/mode/sql.mi
                         <label class="form-label">数据库类型 <span class="text-danger">*</span></label>
                         <select class="form-select" name="dbType">
                             <option value="">请选择数据库类型</option>
-                            <#assign dbTypes = ['MySQL','MariaDB','PostgreSQL','Oracle','SQL Server','SQLite','H2','ClickHouse','DB2','Trino','Derby','HSQLDB','TDengine','DuckDB','Firebird','Drill','Presto','Neo4j','SAP_HANA','Snowflake']>
                             <#list dbTypes as dt>
                                 <option value="${dt}" <#if ((config.dbType)!'') == dt>selected</#if>>${dt}</option>
                             </#list>

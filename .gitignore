@@ -22,6 +22,9 @@ logs/
 .DS_Store
 Thumbs.db
 
+# Drivers (jar files are external, keep readme)
+drivers/*.jar
+
 # Temp
 temp/
 *.log

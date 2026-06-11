@@ -1,9 +1,12 @@
 package com.dataconnect.config;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
+import javax.annotation.PostConstruct;
 import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
@@ -14,14 +17,22 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class AuthInterceptor implements HandlerInterceptor {
 
+    private static final Logger log = LoggerFactory.getLogger(AuthInterceptor.class);
+
     @Value("${app.auth.enabled:true}")
     private boolean authEnabled;
+
+    @PostConstruct
+    public void init() {
+        log.info("登录认证: {}", authEnabled ? "已启用" : "已关闭");
+    }
 
     private static final Map<String, String> TOKEN_STORE = new ConcurrentHashMap<>();
     private static final String COOKIE_NAME = "dc_token";
     private static final String LOGIN_PATH = "/login";
     private static final String[] EXCLUDE_PATHS = {
-            "/login", "/static/", "/h2-console", "/css/", "/js/", "/fonts/", "/codemirror/"
+            "/login", "/static/", "/h2-console", "/css/", "/js/", "/fonts/", "/codemirror/",
+            "/doc.html", "/swagger-ui/", "/v3/api-docs", "/webjars/"
     };
 
     public static String createToken(String username) {

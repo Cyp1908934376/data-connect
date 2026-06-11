@@ -5,6 +5,7 @@ import com.dataconnect.entity.DsConfig;
 import com.dataconnect.service.ApiClientService;
 import com.dataconnect.service.DataSourceService;
 import com.dataconnect.service.DebugLogService;
+import com.dataconnect.service.DriverService;
 import com.dataconnect.service.TemplateService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,6 +38,9 @@ public class DataSourceController {
     @Autowired
     private TemplateService templateService;
 
+    @Autowired
+    private DriverService driverService;
+
     @GetMapping("/list")
     public String list(Model model) {
         log.info("访问数据源列表页");
@@ -54,6 +58,7 @@ public class DataSourceController {
         model.addAttribute("pageTitle", id != null ? "编辑数据源" : "新增数据源");
         model.addAttribute("config", config);
         model.addAttribute("templates", templateService.listAll());
+        model.addAttribute("dbTypes", driverService.getInstalledDbTypes());
         return "datasource/form";
     }
 

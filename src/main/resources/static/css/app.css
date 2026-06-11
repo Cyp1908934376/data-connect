@@ -1067,3 +1067,112 @@ tr.column-row.drag-over-bottom {
 .snippet-item small {
     font-family: inherit;
 }
+
+/* ========== 驱动下载/上传按钮 ========== */
+.btn-download {
+    color: #0d6efd;
+    border: 1.5px solid #0d6efd;
+    background: transparent;
+    border-radius: 50px;
+    padding: 0.25rem 0.85rem;
+    font-size: 0.8rem;
+    font-weight: 500;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+}
+.btn-download:hover, .btn-download:focus {
+    background: #0d6efd;
+    color: #fff;
+    box-shadow: 0 3px 12px rgba(13, 110, 253, 0.35);
+    transform: translateY(-1.5px);
+}
+
+.btn-upload {
+    color: #198754;
+    border: 1.5px solid #198754;
+    background: transparent;
+    border-radius: 50px;
+    padding: 0.25rem 0.85rem;
+    font-size: 0.8rem;
+    font-weight: 500;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+}
+.btn-upload:hover, .btn-upload:focus {
+    background: #198754;
+    color: #fff;
+    box-shadow: 0 3px 12px rgba(25, 135, 84, 0.35);
+    transform: translateY(-1.5px);
+}
+
+/* ========== 驱动管理页面 ========== */
+.driver-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+}
+@media (max-width: 1200px) {
+    .driver-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 768px) {
+    .driver-grid { grid-template-columns: 1fr; }
+}
+
+.driver-card {
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 12px;
+    transition: box-shadow 0.2s;
+    background: #fff;
+}
+.driver-card:hover {
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+.driver-card .driver-name {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: #212529;
+}
+.driver-card .driver-meta {
+    font-size: 0.78rem;
+    color: #6c757d;
+    margin-top: 2px;
+}
+.driver-card .driver-actions {
+    margin-top: 10px;
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+.driver-card .mirror-btn {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.6rem;
+    border-radius: 50px;
+}
+
+.upload-zone {
+    border: 2px dashed #dee2e6;
+    border-radius: 8px;
+    padding: 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    margin-bottom: 16px;
+}
+.upload-zone:hover {
+    border-color: #0d6efd;
+    background: #f8f9ff;
+}
+.upload-zone.drag-over {
+    border-color: #0d6efd;
+    background: #e8f0fe;
+}
+
