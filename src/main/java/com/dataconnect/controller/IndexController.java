@@ -24,6 +24,11 @@ public class IndexController {
     @Autowired
     private TaskConfigRepository taskConfigRepository;
 
+    @GetMapping("/guide")
+    public String guide() {
+        return "guide";
+    }
+
     @GetMapping("/")
     public String index(Model model) {
         model.addAttribute("dsCount", dsConfigRepository.count());

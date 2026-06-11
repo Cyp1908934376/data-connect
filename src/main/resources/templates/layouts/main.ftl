@@ -32,6 +32,11 @@
                 </a>
             </li>
             <li class="nav-item">
+                <a class="nav-link ${(activeMenu=='guide')?string('active','')}" href="/guide">
+                    <i class="bi bi-compass"></i> 新手引导
+                </a>
+            </li>
+            <li class="nav-item">
                 <a class="nav-link ${(activeMenu=='datasource')?string('active','')}" href="/datasource/list">
                     <i class="bi bi-database"></i> 数据源管理
                 </a>
