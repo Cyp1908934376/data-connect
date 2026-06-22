@@ -113,6 +113,41 @@ public class ExecutionLogFileService {
         }
     }
 
+    /**
+     * Delete a specific execution log file.
+     */
+    public boolean deleteExecutionLog(Long flowConfigId, String filename) {
+        if (filename.contains("..") || filename.contains("/") || filename.contains("\\")) {
+            log.warn("非法文件名, flowConfigId={}, filename={}", flowConfigId, filename);
+            return false;
+        }
+        Path file = getFlowDir(flowConfigId).resolve(filename);
+        try {
+            return Files.deleteIfExists(file);
+        } catch (IOException e) {
+            log.warn("删除执行日志失败, flowConfigId={}, file={}", flowConfigId, filename, e);
+            return false;
+        }
+    }
+
+    /**
+     * Delete all execution log files for a flow.
+     */
+    public int deleteAllExecutionLogs(Long flowConfigId) {
+        Path dir = getFlowDir(flowConfigId);
+        if (!Files.exists(dir)) return 0;
+        int count = 0;
+        try {
+            List<String> files = listExecutionLogs(flowConfigId);
+            for (String fname : files) {
+                if (deleteExecutionLog(flowConfigId, fname)) count++;
+            }
+        } catch (Exception e) {
+            log.warn("批量删除执行日志失败, flowConfigId={}", flowConfigId, e);
+        }
+        return count;
+    }
+
     private Path getFlowDir(Long flowConfigId) {
         return Paths.get(BASE_PATH + flowConfigId);
     }

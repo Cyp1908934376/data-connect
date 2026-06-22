@@ -3,6 +3,7 @@ package com.dataconnect.service;
 import com.dataconnect.entity.DebugLog;
 import com.dataconnect.repository.DebugLogRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,7 +16,8 @@ import java.util.Map;
 public class DebugLogService {
 
     private static final Logger log = LoggerFactory.getLogger(DebugLogService.class);
-    private static final ObjectMapper objectMapper = new ObjectMapper();
+    private static final ObjectMapper objectMapper = new ObjectMapper()
+            .registerModule(new JavaTimeModule());
 
     @Autowired
     private DebugLogRepository debugLogRepository;

@@ -153,4 +153,21 @@ public class FlowController {
         Map<String, Object> wm = executionLogFileService.loadWatermark(flowId);
         return ApiResponse.success(wm);
     }
+
+    @DeleteMapping("/api/execution-log/{flowId}/{filename}")
+    @ResponseBody
+    public ApiResponse<Boolean> deleteExecutionLog(
+            @PathVariable Long flowId, @PathVariable String filename) {
+        log.info("删除执行日志, flowId={}, filename={}", flowId, filename);
+        boolean deleted = executionLogFileService.deleteExecutionLog(flowId, filename);
+        return deleted ? ApiResponse.success(true) : ApiResponse.error("删除失败");
+    }
+
+    @DeleteMapping("/api/execution-logs/{flowId}")
+    @ResponseBody
+    public ApiResponse<Integer> deleteAllExecutionLogs(@PathVariable Long flowId) {
+        log.info("清空所有执行日志, flowId={}", flowId);
+        int count = executionLogFileService.deleteAllExecutionLogs(flowId);
+        return ApiResponse.success(count);
+    }
 }

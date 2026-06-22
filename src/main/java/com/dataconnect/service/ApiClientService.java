@@ -310,6 +310,7 @@ public class ApiClientService {
             binding.setVariable("http", new HttpHelper(config));
             binding.setVariable("config", config);
             binding.setVariable("params", extraParams != null ? extraParams : Collections.emptyMap());
+            binding.setVariable("input", extraParams != null ? extraParams : Collections.emptyMap());
             binding.setVariable("out", new LinkedHashMap<>());
 
             groovy.lang.GroovyShell shell = new groovy.lang.GroovyShell(binding);
@@ -378,16 +379,30 @@ public class ApiClientService {
 
         private Map<String, Object> doRequest(String url, String method, String body, Map<String, String> headers) throws Exception {
             Request.Builder builder = new Request.Builder().url(url);
+            String contentType = "application/json";
             if (headers != null) {
                 for (Map.Entry<String, String> h : headers.entrySet()) {
-                    builder.addHeader(h.getKey(), h.getValue());
+                    if ("Content-Type".equalsIgnoreCase(h.getKey())) {
+                        contentType = h.getValue();
+                    } else {
+                        builder.addHeader(h.getKey(), h.getValue());
+                    }
                 }
             }
-            RequestBody requestBody = null;
+            RequestBody requestBody;
             if (body != null && !body.isEmpty()) {
-                requestBody = RequestBody.create(body, MediaType.parse("application/json"));
+                requestBody = RequestBody.create(body, MediaType.parse(contentType));
+            } else if ("POST".equalsIgnoreCase(method) || "PUT".equalsIgnoreCase(method) || "PATCH".equalsIgnoreCase(method)) {
+                requestBody = RequestBody.create("", MediaType.parse(contentType));
+            } else {
+                requestBody = null;
             }
             builder.method(method, requestBody);
+
+            log.debug("HTTP {} {} [Content-Type={}]", method, url, contentType);
+            if (body != null && !body.isEmpty() && body.length() < 1000) {
+                log.debug("HTTP body: {}", body);
+            }
 
             OkHttpClient client = buildClient(config);
             try (Response response = client.newCall(builder.build()).execute()) {
@@ -395,6 +410,7 @@ public class ApiClientService {
                 result.put("status", response.code());
                 result.put("success", response.isSuccessful());
                 String responseBody = response.body() != null ? response.body().string() : "";
+                log.debug("HTTP response {} {}: {}", method, url, responseBody.length() > 500 ? responseBody.substring(0, 500) + "..." : responseBody);
                 try {
                     result.put("data", objectMapper.readValue(responseBody, Object.class));
                 } catch (Exception e) {

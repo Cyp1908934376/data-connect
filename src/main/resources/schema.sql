@@ -184,6 +184,8 @@ ALTER TABLE flow_config ADD COLUMN IF NOT EXISTS incremental_column_type VARCHAR
 
 ALTER TABLE column_config ADD COLUMN IF NOT EXISTS column_type VARCHAR(20) DEFAULT 'RECEIVE';
 
+ALTER TABLE mapping_template ADD COLUMN IF NOT EXISTS push_column_config_id BIGINT DEFAULT 0;
+
 CREATE INDEX IF NOT EXISTS idx_ds_config_source_type ON ds_config(source_type);
 CREATE INDEX IF NOT EXISTS idx_ds_config_enabled ON ds_config(enabled);
 CREATE INDEX IF NOT EXISTS idx_template_category_id ON template(category_id);

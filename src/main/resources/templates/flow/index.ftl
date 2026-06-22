@@ -83,7 +83,9 @@
                     </div>
                 </div>
                 <!-- 执行记录列表 -->
-                <h6><i class="bi bi-list-ul"></i> 执行记录</h6>
+                <h6><i class="bi bi-list-ul"></i> 执行记录
+                    <button type="button" class="btn btn-sm btn-outline-danger float-end" onclick="clearAllLogs()" title="清空所有日志"><i class="bi bi-trash"></i> 清空日志</button>
+                </h6>
                 <div class="table-responsive" style="max-height:300px;overflow-y:auto;">
                     <table class="table table-sm table-hover">
                         <thead><tr><th>执行时间</th><th>策略</th><th>状态</th><th>读取</th><th>写入</th><th>耗时</th><th>操作</th></tr></thead>
@@ -185,7 +187,7 @@ function loadExecLogs() {
                 rows += '<td class="small exec-read">-</td>';
                 rows += '<td class="small exec-write">-</td>';
                 rows += '<td class="small exec-dur">-</td>';
-                rows += '<td><button class="btn btn-sm btn-outline-info" onclick="viewLogDetail(\'' + fname + '\')"><i class="bi bi-eye"></i></button></td>';
+                rows += '<td><button class="btn btn-sm btn-outline-info me-1" onclick="viewLogDetail(\'' + fname + '\')"><i class="bi bi-eye"></i></button><button class="btn btn-sm btn-outline-danger" onclick="deleteLog(\'' + fname + '\')"><i class="bi bi-trash"></i></button></td>';
                 rows += '</tr>';
             });
             $('#execLogTableBody').html(rows);
@@ -238,6 +240,41 @@ function viewLogDetail(fname) {
         }
     }).fail(function() {
         showError('加载日志详情失败');
+    });
+}
+
+function deleteLog(fname) {
+    if (!confirm('确定删除该执行日志？')) return;
+    $.ajax({
+        url: '/flow/api/execution-log/' + currentLogFlowId + '/' + fname,
+        type: 'DELETE',
+        success: function(res) {
+            if (res.code === 0) {
+                showSuccess('日志已删除');
+                loadExecLogs();
+            } else {
+                showError(res.message || '删除失败');
+            }
+        },
+        error: function() { showError('删除请求失败'); }
+    });
+}
+
+function clearAllLogs() {
+    if (!confirm('确定清空该流程的所有执行日志？此操作不可恢复。')) return;
+    $.ajax({
+        url: '/flow/api/execution-logs/' + currentLogFlowId,
+        type: 'DELETE',
+        success: function(res) {
+            if (res.code === 0) {
+                showSuccess('已清空 ' + (res.data || 0) + ' 条日志');
+                loadExecLogs();
+                $('#logDetailCard').hide();
+            } else {
+                showError(res.message || '清空失败');
+            }
+        },
+        error: function() { showError('清空请求失败'); }
     });
 }
 

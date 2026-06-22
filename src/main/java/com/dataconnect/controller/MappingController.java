@@ -84,7 +84,7 @@ public class MappingController {
         model.addAttribute("pageTitle", id != null ? "编辑对接模板" : "新增对接模板");
         model.addAttribute("template", template);
         model.addAttribute("dataSources", dataSourceService.listAll());
-        model.addAttribute("columnConfigs", columnConfigService.listByType("RECEIVE"));
+        model.addAttribute("columnConfigs", columnConfigService.listAll());
         model.addAttribute("templates", templateService.listAll());
         return "mapping/templateForm";
     }

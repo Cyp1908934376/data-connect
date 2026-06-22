@@ -49,6 +49,7 @@ public class MappingTemplateService {
         existing.setDescription(updated.getDescription());
         existing.setDsConfigId(updated.getDsConfigId());
         existing.setColumnConfigId(updated.getColumnConfigId());
+        existing.setPushColumnConfigId(updated.getPushColumnConfigId());
         existing.setMappings(updated.getMappings());
         existing.setPostmanJson(updated.getPostmanJson());
         MappingTemplate saved = mappingTemplateRepository.save(existing);

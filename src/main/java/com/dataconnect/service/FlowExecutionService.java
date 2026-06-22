@@ -51,7 +51,7 @@ public class FlowExecutionService {
     @Autowired
     private ExecutionLogFileService executionLogFileService;
 
-    private final List<String> executionLogs = new CopyOnWriteArrayList<>();
+    private final List<Map<String, Object>> executionLogs = new CopyOnWriteArrayList<>();
 
     private enum SyncStrategy {
         FULL, INCREMENTAL_TIME, INCREMENTAL_ID;
@@ -64,7 +64,6 @@ public class FlowExecutionService {
 
     public Map<String, Object> execute(Long flowConfigId) {
         executionLogs.clear();
-        List<Map<String, Object>> stepLogs = new ArrayList<>();
         Map<String, Object> result = new LinkedHashMap<>();
         long startTime = System.currentTimeMillis();
 
@@ -82,7 +81,6 @@ public class FlowExecutionService {
         log.info("开始执行对接流程, id={}, name={}, strategy={}", flowConfig.getId(), flowConfig.getName(), strategy);
         try {
             addLog("INFO", "开始执行对接流程: " + flowConfig.getName() + " [策略: " + strategy + "]");
-            addStepLog(stepLogs, "INFO", "开始执行对接流程: " + flowConfig.getName());
 
             // Load watermark for incremental strategies
             Map<String, Object> watermarkBefore = null;
@@ -91,29 +89,24 @@ public class FlowExecutionService {
                 if (watermarkBefore != null) {
                     addLog("INFO", "加载水位线: " + flowConfig.getIncrementalColumn()
                             + " > " + watermarkBefore.get("lastValue"));
-                    addStepLog(stepLogs, "INFO", "加载水位线: " + watermarkBefore.get("lastValue"));
                 } else {
                     addLog("INFO", "首次执行，无历史水位线，将按全量处理");
-                    addStepLog(stepLogs, "INFO", "首次执行，无历史水位线");
                 }
             }
 
             // Step 1: 读取输入数据 (with watermark filter for incremental)
             addLog("INFO", "步骤1: 从输入数据源读取数据...");
-            addStepLog(stepLogs, "INFO", "步骤1: 从输入数据源读取数据");
             List<Map<String, Object>> inputData = readInputData(flowConfig, strategy, watermarkBefore);
             if (inputData == null) {
                 result.put("success", false);
                 result.put("error", "读取输入数据失败");
                 writeExecutionLogToFile(flowConfigId, flowConfig, strategy, startTime,
-                        stepLogs, 0, 0, 0, watermarkBefore, null, "FAILED", "读取输入数据失败");
+                        0, 0, 0, watermarkBefore, null, "FAILED", "读取输入数据失败");
                 return result;
             }
             addLog("INFO", "读取到 " + inputData.size() + " 条数据");
-            addStepLog(stepLogs, "INFO", "读取到 " + inputData.size() + " 条数据");
             if (inputData.size() >= 1000 && strategy != SyncStrategy.FULL) {
                 addLog("WARN", "增量读取达到1000条上限，可能存在未同步数据");
-                addStepLog(stepLogs, "WARN", "增量读取达到1000条上限，可能存在未同步数据");
             }
 
             List<Map<String, Object>> processedData = inputData;
@@ -125,7 +118,6 @@ public class FlowExecutionService {
             // 按阶段顺序执行管道
             for (PipelineStage stage : pipeline) {
                 addLog("INFO", "执行阶段: " + stage.getName() + " [" + stage.getPosition() + "]");
-                addStepLog(stepLogs, "INFO", "执行阶段: " + stage.getName() + " [" + stage.getPosition() + "]");
 
                 if ("AFTER_READ".equals(stage.getPosition())) {
                     for (PipelineStep step : stage.getSteps()) {
@@ -140,10 +132,8 @@ public class FlowExecutionService {
 
             // Step 5: 写入输出数据源 (with upsert for incremental)
             addLog("INFO", "步骤5: 写入输出数据源...");
-            addStepLog(stepLogs, "INFO", "步骤5: 写入输出数据源");
             int writeCount = writeOutputData(flowConfig, processedData, strategy);
             addLog("INFO", "成功写入 " + writeCount + " 条数据");
-            addStepLog(stepLogs, "INFO", "成功写入 " + writeCount + " 条数据");
 
             // Save new watermark from processed data
             Map<String, Object> watermarkAfter = null;
@@ -160,12 +150,10 @@ public class FlowExecutionService {
                     watermarkAfter.put("lastExecStatus", "SUCCESS");
                     watermarkAfter.put("totalSynced", writeCount);
                     executionLogFileService.saveWatermark(flowConfigId, watermarkAfter);
-                    addLog("INFO", "水位线已更新: " + newHighWater);
-                    addStepLog(stepLogs, "INFO", "水位线已更新: " + flowConfig.getIncrementalColumn()
+                    addLog("INFO", "水位线已更新: " + flowConfig.getIncrementalColumn()
                             + " = " + newHighWater);
                 } else {
                     addLog("WARN", "增量列 [" + flowConfig.getIncrementalColumn() + "] 在结果中未找到，水位线未更新");
-                    addStepLog(stepLogs, "WARN", "增量列未在数据中找到，水位线未更新");
                 }
             }
 
@@ -173,7 +161,6 @@ public class FlowExecutionService {
             for (PipelineStage stage : pipeline) {
                 if ("AFTER_WRITE".equals(stage.getPosition())) {
                     addLog("INFO", "执行后置阶段: " + stage.getName());
-                    addStepLog(stepLogs, "INFO", "执行后置阶段: " + stage.getName());
                     for (PipelineStep step : stage.getSteps()) {
                         executeStep(step, processedData, flowConfig.getTemplateParams());
                     }
@@ -182,14 +169,13 @@ public class FlowExecutionService {
 
             long duration = System.currentTimeMillis() - startTime;
             addLog("INFO", "执行完成, 总耗时: " + duration + "ms");
-            addStepLog(stepLogs, "INFO", "执行完成, 总耗时: " + duration + "ms");
 
             log.info("流程执行完成, id={}, name={}, readCount={}, writeCount={}, duration={}ms",
                     flowConfig.getId(), flowConfig.getName(), inputData.size(), writeCount, duration);
 
             // Write execution log to file
             writeExecutionLogToFile(flowConfigId, flowConfig, strategy, startTime,
-                    stepLogs, inputData.size(), processedData.size(), writeCount,
+                    inputData.size(), processedData.size(), writeCount,
                     watermarkBefore, watermarkAfter, "SUCCESS", null);
 
             result.put("success", true);
@@ -198,29 +184,21 @@ public class FlowExecutionService {
             result.put("failCount", failCount);
             result.put("writeCount", writeCount);
             result.put("duration", duration);
-            result.put("logs", new ArrayList<>(executionLogs));
+            result.put("logs", getExecutionLogs());
         } catch (Exception e) {
             log.error("Flow execution failed", e);
             writeExecutionLogToFile(flowConfigId, flowConfig, strategy, startTime,
-                    stepLogs, 0, 0, 0, null, null, "FAILED", e.getMessage());
+                    0, 0, 0, null, null, "FAILED", e.getMessage());
             result.put("success", false);
             result.put("error", e.getMessage());
-            result.put("logs", new ArrayList<>(executionLogs));
+            result.put("logs", getExecutionLogs());
         }
 
         return result;
     }
 
-    private void addStepLog(List<Map<String, Object>> stepLogs, String level, String message) {
-        Map<String, Object> entry = new LinkedHashMap<>();
-        entry.put("timestamp", LocalDateTime.now().toString());
-        entry.put("level", level);
-        entry.put("message", message);
-        stepLogs.add(entry);
-    }
-
     private void writeExecutionLogToFile(Long flowConfigId, FlowConfig flowConfig,
-            SyncStrategy strategy, long startTime, List<Map<String, Object>> stepLogs,
+            SyncStrategy strategy, long startTime,
             int readCount, int successCount, int writeCount,
             Map<String, Object> watermarkBefore, Map<String, Object> watermarkAfter,
             String status, String errorMessage) {
@@ -241,7 +219,7 @@ public class FlowExecutionService {
             if (watermarkBefore != null) execData.put("watermarkBefore", watermarkBefore);
             if (watermarkAfter != null) execData.put("watermarkAfter", watermarkAfter);
             if (errorMessage != null) execData.put("errorMessage", errorMessage);
-            execData.put("stepLogs", stepLogs);
+            execData.put("stepLogs", new ArrayList<>(executionLogs));
             executionLogFileService.writeExecutionLog(flowConfigId, execData);
         } catch (Exception e) {
             log.error("写入执行日志文件失败, flowConfigId={}", flowConfigId, e);
@@ -797,34 +775,36 @@ public class FlowExecutionService {
 
         String dbType = dsConfig.getDbType();
         int count = 0;
+        addLog("INFO", "开始写入数据库, dbType=" + dbType + ", 数据量=" + data.size());
         try (Connection conn = ds.getConnection()) {
-            // Auto-create target table from the first row's columns
             Map<String, Object> firstRow = data.get(0);
-            // 优先使用输出数据源配置的表名，未指定则用默认表
             String tableName = (dsConfig.getTableName() != null && !dsConfig.getTableName().isEmpty())
                     ? dsConfig.getTableName() : "data_sync_result";
             if (!tableExists(conn, tableName)) {
                 String ddl = buildCreateTableDDL(tableName, firstRow, dbType);
                 try (Statement stmt = conn.createStatement()) {
                     stmt.execute(ddl);
-                    addLog("DEBUG", "自动创建目标表: " + tableName + " (dbType=" + dbType + ")");
+                    addLog("INFO", "自动建表: " + tableName + "\nDDL: " + ddl);
                     log.info("自动创建目标表, table={}, dbType={}", tableName, dbType);
                 }
             }
 
+            int rowNum = 0;
             for (Map<String, Object> row : data) {
+                rowNum++;
                 if (row.isEmpty()) continue;
                 try {
                     if (strategy == SyncStrategy.FULL) {
-                        // Full sync: plain INSERT
                         executeInsert(conn, tableName, row);
                     } else {
-                        // Incremental: try INSERT first, fallback to UPDATE on duplicate key
                         executeUpsert(conn, tableName, row, dbType);
+                    }
+                    if (rowNum <= 3) { // Log first 3 SQLs
+                        addLog("DEBUG", "[" + rowNum + "/" + data.size() + "] 写入DB成功, 字段: " + row.keySet());
                     }
                     count++;
                 } catch (Exception e) {
-                    addLog("ERROR", "写入行失败: " + e.getMessage());
+                    addLog("ERROR", "[" + rowNum + "/" + data.size() + "] 写入行失败: " + e.getMessage());
                     log.warn("写入行失败, table={}", tableName, e);
                 }
             }
@@ -1056,29 +1036,43 @@ public class FlowExecutionService {
 
     private int writeToApi(DsConfig dsConfig, List<Map<String, Object>> data) {
         int count = 0;
+        int rowNum = 0;
         for (Map<String, Object> row : data) {
+            rowNum++;
             try {
-                // 使用模板变量替换方式
                 Map<String, String> params = new HashMap<>();
                 for (Map.Entry<String, Object> entry : row.entrySet()) {
                     params.put(entry.getKey(), String.valueOf(entry.getValue()));
                 }
-                apiClientService.executeRequest(dsConfig, params);
+                addLog("INFO", "[" + rowNum + "/" + data.size() + "] 推送数据行, 字段: " + params.keySet());
+                String resp = apiClientService.executeRequest(dsConfig, params);
+                addLog("INFO", "[" + rowNum + "/" + data.size() + "] 推送完成, 响应长度: " + (resp != null ? resp.length() : 0));
+                if (resp != null && resp.length() < 500) {
+                    addLog("INFO", "[" + rowNum + "/" + data.size() + "] 响应内容: " + resp);
+                }
                 count++;
             } catch (Exception e) {
-                addLog("ERROR", "写入接口失败: " + e.getMessage());
+                addLog("ERROR", "[" + rowNum + "/" + data.size() + "] 写入接口失败: " + e.getMessage());
             }
         }
         return count;
     }
 
     private void addLog(String level, String message) {
-        String logLine = LocalDateTime.now() + " [" + level + "] " + message;
-        executionLogs.add(logLine);
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("timestamp", LocalDateTime.now().toString());
+        entry.put("level", level);
+        entry.put("message", message);
+        executionLogs.add(entry);
     }
 
     public List<String> getExecutionLogs() {
-        return new ArrayList<>(executionLogs);
+        List<String> result = new ArrayList<>();
+        for (Map<String, Object> entry : executionLogs) {
+            String line = entry.get("timestamp") + " [" + entry.get("level") + "] " + entry.get("message");
+            result.add(line);
+        }
+        return result;
     }
 
     /**

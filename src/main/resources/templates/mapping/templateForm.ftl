@@ -51,11 +51,27 @@
                             <option value="">-- 选择列配置 --</option>
                             <#if columnConfigs??>
                                 <#list columnConfigs as cc>
-                                    <option value="${cc.id}" data-columns="${cc.columnsJson!''}" <#if template.columnConfigId?? && template.columnConfigId == cc.id>selected</#if>>${cc.name}</option>
+                                    <#if ((cc.columnType)!'RECEIVE') == 'RECEIVE'>
+                                    <option value="${cc.id}" <#if template.columnConfigId?? && template.columnConfigId == cc.id>selected</#if>>${cc.name}</option>
+                                    </#if>
                                 </#list>
                             </#if>
                         </select>
                         <small class="text-muted">选择列配置来定义接收列（<a href="/mapping/columnConfig" target="_blank">管理列配置</a>）</small>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">推送列配置</label>
+                        <select class="form-select" id="pushColumnConfigId" name="pushColumnConfigId" onchange="onPushColumnConfigChange()">
+                            <option value="">-- 选择推送列配置 --</option>
+                            <#if columnConfigs??>
+                                <#list columnConfigs as cc>
+                                    <#if ((cc.columnType)!'RECEIVE') == 'PUSH'>
+                                    <option value="${cc.id}" <#if (template.pushColumnConfigId!0) == cc.id>selected</#if>>${cc.name}</option>
+                                    </#if>
+                                </#list>
+                            </#if>
+                        </select>
+                        <small class="text-muted">选择列配置来定义推送列（可选，仅显示推送列类型）</small>
                     </div>
                 </div>
             </div>
@@ -141,18 +157,14 @@ try {
 
 function onColumnConfigChange() {
     var opt = $('#columnConfigId option:selected');
-    var columnsJson = opt.data('columns');
-    if (!columnsJson) {
+    var configId = opt.val();
+    if (!configId || !allColumnConfigData[configId]) {
         $('#emptyMappingRow').show();
         $('#mappingTableBody tr:not(#emptyMappingRow)').remove();
         return;
     }
-    try {
-        var cols = typeof columnsJson === 'string' ? JSON.parse(columnsJson) : columnsJson;
-        renderMappingRows(cols);
-    } catch(e) {
-        showError('列配置JSON解析失败');
-    }
+    var cols = allColumnConfigData[configId];
+    renderMappingRows(cols);
 }
 
 function renderMappingRows(receiveColumns) {
@@ -189,14 +201,24 @@ function addMappingRow() {
 }
 
 function addMappingRowInternal(idx, receiveKey, receiveValue, type, pushKey, pushValue, templateId, templateName) {
-    // Build push column dropdown from the currently selected column config only
-    var selectedConfigId = $('#columnConfigId').val();
-    var configCols = allColumnConfigData[selectedConfigId] || [];
+    // Build push column dropdown from push column config first, fall back to receive config
+    var pushConfigId = $('#pushColumnConfigId').val();
+    var receiveConfigId = $('#columnConfigId').val();
+    var pushCols = (pushConfigId && allColumnConfigData[pushConfigId]) ? allColumnConfigData[pushConfigId] : [];
+    var receiveCols = allColumnConfigData[receiveConfigId] || [];
     var pushOptions = '<option value="">-- 选择推送列 --</option>';
-    if (configCols.length > 0) {
-        pushOptions += '<optgroup label="接收列配置列">';
-        configCols.forEach(function(c) {
+    if (pushCols.length > 0) {
+        pushOptions += '<optgroup label="推送列配置">';
+        pushCols.forEach(function(c) {
             var sel = (pushKey === c.key) ? ' selected' : '';
+            pushOptions += '<option value="' + (c.key || '') + '" data-value="' + (c.value || '') + '"' + sel + '>' + (c.key || '') + ' (' + (c.value || '') + ')</option>';
+        });
+        pushOptions += '</optgroup>';
+    }
+    if (receiveCols.length > 0) {
+        pushOptions += '<optgroup label="接收列配置">';
+        receiveCols.forEach(function(c) {
+            var sel = (pushKey === c.key && pushCols.length === 0) ? ' selected' : '';
             pushOptions += '<option value="' + (c.key || '') + '" data-value="' + (c.value || '') + '"' + sel + '>' + (c.key || '') + ' (' + (c.value || '') + ')</option>';
         });
         pushOptions += '</optgroup>';
@@ -221,27 +243,92 @@ function addMappingRowInternal(idx, receiveKey, receiveValue, type, pushKey, pus
     renumberRows();
 }
 
+// Refresh push column dropdowns when push column config changes
+function onPushColumnConfigChange() {
+    var rows = $('#mappingTableBody tr.mapping-row');
+    if (rows.length === 0) return;
+    // Rebuild push options
+    var pushConfigId = $('#pushColumnConfigId').val();
+    var receiveConfigId = $('#columnConfigId').val();
+    var pushCols = (pushConfigId && allColumnConfigData[pushConfigId]) ? allColumnConfigData[pushConfigId] : [];
+    var receiveCols = allColumnConfigData[receiveConfigId] || [];
+    var pushOptions = '<option value="">-- 选择推送列 --</option>';
+    if (pushCols.length > 0) {
+        pushOptions += '<optgroup label="推送列配置">';
+        pushCols.forEach(function(c) {
+            pushOptions += '<option value="' + (c.key || '') + '" data-value="' + (c.value || '') + '">' + (c.key || '') + ' (' + (c.value || '') + ')</option>';
+        });
+        pushOptions += '</optgroup>';
+    }
+    if (receiveCols.length > 0) {
+        pushOptions += '<optgroup label="接收列配置">';
+        receiveCols.forEach(function(c) {
+            pushOptions += '<option value="' + (c.key || '') + '" data-value="' + (c.value || '') + '">' + (c.key || '') + ' (' + (c.value || '') + ')</option>';
+        });
+        pushOptions += '</optgroup>';
+    }
+    pushOptions += '<option value="__custom__">-- 自定义 --</option>';
+    rows.each(function() {
+        var $row = $(this);
+        var currentPushKey = $row.find('.push-key').val();
+        // Only update if the push key is a select, not custom input
+        if ($row.find('.push-key').is('select')) {
+            $row.find('.push-key').html(pushOptions);
+            if (currentPushKey) $row.find('.push-key').val(currentPushKey);
+        }
+    });
+}
+
+// Track used push keys globally for searchable dropdown
+window._usedPushKeys = [];
+
+function collectUsedPushKeys() {
+    var selected = [];
+    $('#mappingTableBody tr.mapping-row').each(function() {
+        var $pk = $(this).find('.push-key');
+        var val = $pk.is('select') ? $pk.val() : $pk.val();
+        if (val && val !== '__custom__' && val !== '') selected.push(val);
+    });
+    window._usedPushKeys = selected;
+}
+
 function onPushKeyChange(sel) {
     var val = $(sel).val();
-    var row = $(sel).closest('tr');
+    var $row = $(sel).closest('tr');
     if (val === '__custom__') {
-        // Replace the searchable wrapper (if exists) or the select itself
         var wrap = $(sel).closest('.searchable-select-wrap');
         if (wrap.length) {
             wrap.replaceWith('<input type="text" class="form-control form-control-sm push-key" value="" placeholder="自定义推送键">');
         } else {
-            row.find('.push-key').replaceWith('<input type="text" class="form-control form-control-sm push-key" value="" placeholder="自定义推送键">');
+            $row.find('.push-key').replaceWith('<input type="text" class="form-control form-control-sm push-key" value="" placeholder="自定义推送键">');
         }
-        row.find('.push-value').val('');
-    } else {
-        var selectedOption = $(sel).find('option:selected');
-        row.find('.push-value').val(selectedOption.data('value') || '');
+        $row.find('.push-value').val('');
+        collectUsedPushKeys();
+        return;
     }
+    // Check for duplicate
+    var otherKeys = [];
+    $('#mappingTableBody tr.mapping-row').each(function() {
+        if (this === $row[0]) return;
+        var $pk = $(this).find('.push-key');
+        var v = $pk.is('select') ? $pk.val() : $pk.val();
+        if (v && v !== '__custom__') otherKeys.push(v);
+    });
+    if (val && otherKeys.indexOf(val) >= 0) {
+        showWarning('推送键 "' + val + '" 已在其他行使用');
+        $(sel).val('');
+        $row.find('.push-value').val('');
+        return;
+    }
+    var selectedOption = $(sel).find('option:selected');
+    $row.find('.push-value').val(selectedOption.data('value') || '');
+    collectUsedPushKeys();
 }
 
 function removeMappingRow(btn) {
     $(btn).closest('tr').remove();
     renumberRows();
+    collectUsedPushKeys();
     if ($('#mappingTableBody tr.mapping-row').length === 0) {
         $('#emptyMappingRow').show();
     }
@@ -338,7 +425,13 @@ function saveTemplate() {
     $.post('/mapping/api/saveTemplate', formData, function(res) {
         if (res.code === 0) {
             showSuccess('保存成功');
-            setTimeout(function() { location.href = '/mapping/templateList'; }, 500);
+            // Update template id if new (so subsequent saves update instead of create)
+            if (res.data && res.data.id && !$('#templateId').val()) {
+                $('#templateId').val(res.data.id);
+                // Update URL without reload
+                var newUrl = '/mapping/templateForm?id=' + res.data.id;
+                history.replaceState(null, '', newUrl);
+            }
         } else {
             showError(res.message || '', { title: '保存失败' });
         }

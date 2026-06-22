@@ -111,14 +111,18 @@ function makeSearchable($select) {
         filter = (filter || '').toLowerCase();
         var html = '';
         var hasMatch = false;
+        var usedKeys = window._usedPushKeys || [];
         $select.find('option').each(function() {
             var opt = $(this);
-            if (opt.val() === '' && opt.text() === '') return; // skip empty
+            var optVal = opt.val() || '';
+            if (optVal === '' && opt.text() === '') return; // skip empty
             var text = opt.text().toLowerCase();
-            var val = opt.val() ? opt.val().toLowerCase() : '';
+            var val = optVal.toLowerCase();
             if (filter === '' || text.indexOf(filter) >= 0 || val.indexOf(filter) >= 0) {
-                var selected = opt.val() === $select.val() ? ' selected' : '';
-                html += '<div class="searchable-select-option' + selected + '" data-value="' + (opt.val() || '') + '">' + opt.text() + '</div>';
+                var selected = optVal === $select.val() ? ' selected' : '';
+                var isUsed = optVal && optVal !== '__custom__' && usedKeys.indexOf(optVal) >= 0 && optVal !== $select.val();
+                var usedClass = isUsed ? ' option-used' : '';
+                html += '<div class="searchable-select-option' + selected + usedClass + '" data-value="' + optVal + '">' + (isUsed ? '已选- ' : '') + opt.text() + '</div>';
                 hasMatch = true;
             }
         });

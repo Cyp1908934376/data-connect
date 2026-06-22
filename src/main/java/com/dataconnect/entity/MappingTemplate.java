@@ -23,6 +23,9 @@ public class MappingTemplate {
     @Column(name = "column_config_id")
     private Long columnConfigId;
 
+    @Column(name = "push_column_config_id")
+    private Long pushColumnConfigId;
+
     @Column(name = "mappings", columnDefinition = "TEXT")
     private String mappings;
 
@@ -56,6 +59,8 @@ public class MappingTemplate {
     public void setDsConfigId(Long dsConfigId) { this.dsConfigId = dsConfigId; }
     public Long getColumnConfigId() { return columnConfigId; }
     public void setColumnConfigId(Long columnConfigId) { this.columnConfigId = columnConfigId; }
+    public Long getPushColumnConfigId() { return pushColumnConfigId; }
+    public void setPushColumnConfigId(Long pushColumnConfigId) { this.pushColumnConfigId = pushColumnConfigId; }
     public String getMappings() { return mappings; }
     public void setMappings(String mappings) { this.mappings = mappings; }
     public String getPostmanJson() { return postmanJson; }
