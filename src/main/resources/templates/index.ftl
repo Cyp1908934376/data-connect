@@ -92,6 +92,21 @@
                 </div>
             </div>
         </div>
+        <div class="col-md-6 mb-3">
+            <div class="card h-100">
+                <div class="card-header">数据同步</div>
+                <div class="card-body">
+                    <div class="d-grid gap-2">
+                        <button class="btn btn-outline-info btn-sync-reload">
+                            <i class="bi bi-arrow-down-circle"></i> 从 data.sql 重新加载
+                        </button>
+                        <button class="btn btn-outline-success btn-sync-export">
+                            <i class="bi bi-arrow-up-circle"></i> 导出配置到 data.sql
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 

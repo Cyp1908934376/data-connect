@@ -1,0 +1,549 @@
+{
+  "thesis": {
+    "pureId": 1585427888,
+    "uuid": "487a8d76-1ced-4fb0-8554-46b8735adca6",
+    "createdBy": "Haoyu.Shi@nottingham.edu.cn",
+    "createdDate": "2024-12-13T13:51:27.056+08:00",
+    "modifiedBy": "jumei.zhang@nottingham.edu.cn",
+    "modifiedDate": "2025-08-17T12:02:00.869+08:00",
+    "portalUrl": "https://research.nottingham.edu.cn/zh/studentTheses/487a8d76-1ced-4fb0-8554-46b8735adca6",
+    "version": "43f3ca85beb14c74fe688002cab00aa8037de2c9",
+    "title": {
+      "value": "Nano-positioning stage for damage-controlled grinding of optical glass lenses"
+    },
+    "language": {
+      "uri": "/dk/atira/pure/core/languages/en_GB",
+      "term": {
+        "en_GB": "English",
+        "zh_CN": "英语"
+      }
+    },
+    "managingOrganization": {
+      "systemName": "Organization",
+      "uuid": "68a9e470-ce5c-497f-8c25-747ae54d3e4f"
+    },
+    "type": {
+      "uri": "/dk/atira/pure/studentthesis/studentthesistypes/studentthesis/phd",
+      "term": {
+        "en_GB": "PhD Thesis",
+        "zh_CN": "学术博士论文"
+      }
+    },
+    "documents": [
+      {
+        "pureId": 1783618328,
+        "fileId": "MDZhNGZkYjE4",
+        "fileName": "Haoyu_Shi_PhD_Thesis_Revised_Version_Third_Revision_clean_version_.docx",
+        "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "size": 15541165,
+        "url": "https://research.nottingham.edu.cn/ws/api/student-theses/487a8d76-1ced-4fb0-8554-46b8735adca6/files/MDZhNGZkYjE4/Haoyu_Shi_PhD_Thesis_Revised_Version_Third_Revision_clean_version_.docx",
+        "fileStoreLocations": {},
+        "title": "Haoyu Shi PhD Thesis Revised Version (Third Revision)(clean version)",
+        "type": {
+          "uri": "/dk/atira/pure/core/document/studentthesisdoctypes/thesis",
+          "term": {
+            "en_GB": "Thesis-as examined",
+            "zh_CN": "审核通过的论文"
+          }
+        },
+        "license": {
+          "uri": "/dk/atira/pure/core/document/licenses/cc_by",
+          "term": {
+            "en_GB": "CC BY",
+            "zh_CN": "CC BY"
+          }
+        },
+        "visibility": {
+          "key": "FREE",
+          "description": {
+            "en_GB": "Public - No restriction",
+            "zh_CN": "公开 - 无限制"
+          }
+        },
+        "creator": "Haoyu.Shi@nottingham.edu.cn",
+        "created": "2025-07-02T00:15:23.575+08:00"
+      }
+    ],
+    "organizations": [
+      {
+        "systemName": "Organization",
+        "uuid": "68a9e470-ce5c-497f-8c25-747ae54d3e4f"
+      }
+    ],
+    "researchOutputs": [
+      {
+        "systemName": "ResearchOutput",
+        "uuid": "cee9d443-96e0-41b9-9227-fc964fd1065e"
+      },
+      {
+        "systemName": "ResearchOutput",
+        "uuid": "4a19633a-5f70-4ef9-9b13-cb0ef79a7013"
+      },
+      {
+        "systemName": "ResearchOutput",
+        "uuid": "797f790a-4f67-4df9-b36e-7530a9c45737"
+      }
+    ],
+    "keywordGroups": [
+      {
+        "typeDiscriminator": "ClassificationsKeywordGroup",
+        "pureId": 1783925674,
+        "logicalName": "librarySubjects",
+        "name": {
+          "en_GB": "Library Subjects",
+          "zh_CN": "Library Subjects"
+        },
+        "classifications": [
+          {
+            "uri": "/dk/atira/pure/core/keywords/T/TJ",
+            "term": {
+              "en_GB": "TJ Mechanical engineering and machinery",
+              "zh_CN": "TJ Mechanical engineering and machinery"
+            }
+          }
+        ],
+        "keywordContainers": [
+          {
+            "pureId": 1783925675,
+            "state": "ACCEPTED",
+            "origin": "USER_SUPPLIED",
+            "structuredKeyword": {
+              "uri": "/dk/atira/pure/core/keywords/T/TJ",
+              "term": {
+                "en_GB": "TJ Mechanical engineering and machinery",
+                "zh_CN": "TJ Mechanical engineering and machinery"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "typeDiscriminator": "ClassificationsKeywordGroup",
+        "pureId": 1585427891,
+        "logicalName": "waiver",
+        "name": {
+          "en_GB": "Waiver",
+          "zh_CN": "Waiver"
+        },
+        "classifications": [
+          {
+            "uri": "/cn/edu/unnc/waiver/approve",
+            "term": {
+              "en_GB": "I approve that a copy of my thesis may be given to my supervisor, if they request it during an embargo period.",
+              "zh_CN": "I approve that a copy of my thesis may be given to my supervisor, if they request it during an embargo period."
+            }
+          }
+        ],
+        "keywordContainers": [
+          {
+            "pureId": 1585427892,
+            "state": "ACCEPTED",
+            "origin": "USER_SUPPLIED",
+            "structuredKeyword": {
+              "uri": "/cn/edu/unnc/waiver/approve",
+              "term": {
+                "en_GB": "I approve that a copy of my thesis may be given to my supervisor, if they request it during an embargo period.",
+                "zh_CN": "I approve that a copy of my thesis may be given to my supervisor, if they request it during an embargo period."
+              }
+            }
+          }
+        ]
+      },
+      {
+        "typeDiscriminator": "ClassificationsKeywordGroup",
+        "pureId": 1585427893,
+        "logicalName": "supervisorDiscussion",
+        "name": {
+          "en_GB": "Supervisor Discussion",
+          "zh_CN": "Supervisor Discussion"
+        },
+        "classifications": [
+          {
+            "uri": "/cn/edu/unnc/supervisor-discussion/confirm",
+            "term": {
+              "en_GB": "I confirm I have discussed with my supervisor whether my thesis should be made publicly available immediately upon graduation, or if it should be subject to either an embargo or restriction.",
+              "zh_CN": "I confirm I have discussed with my supervisor whether my thesis should be made publicly available immediately upon graduation, or if it should be subject to either an embargo or restriction."
+            }
+          }
+        ],
+        "keywordContainers": [
+          {
+            "pureId": 1585427894,
+            "state": "ACCEPTED",
+            "origin": "USER_SUPPLIED",
+            "structuredKeyword": {
+              "uri": "/cn/edu/unnc/supervisor-discussion/confirm",
+              "term": {
+                "en_GB": "I confirm I have discussed with my supervisor whether my thesis should be made publicly available immediately upon graduation, or if it should be subject to either an embargo or restriction.",
+                "zh_CN": "I confirm I have discussed with my supervisor whether my thesis should be made publicly available immediately upon graduation, or if it should be subject to either an embargo or restriction."
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "visibility": {
+      "key": "BACKEND",
+      "description": {
+        "en_GB": "Backend - Restricted to UNNC RIS users",
+        "zh_CN": "后台 - 限于 UNNC RIS 用户"
+      }
+    },
+    "contributors": [
+      {
+        "typeDiscriminator": "InternalContributorAssociation",
+        "pureId": 1585427896,
+        "name": {
+          "firstName": "Haoyu",
+          "lastName": "Shi"
+        },
+        "role": {
+          "uri": "/dk/atira/pure/studentthesis/roles/studentthesis/author",
+          "term": {
+            "en_GB": "Author",
+            "zh_CN": "作者"
+          }
+        },
+        "associationHidden": false,
+        "person": {
+          "systemName": "Person",
+          "uuid": "e3fab8ba-3af3-47b3-a86e-ea6d3dc10eec"
+        },
+        "organizations": [
+          {
+            "systemName": "Organization",
+            "uuid": "68a9e470-ce5c-497f-8c25-747ae54d3e4f"
+          }
+        ]
+      }
+    ],
+    "customDefinedFields": {},
+    "workflow": {
+      "step": "approved",
+      "description": {
+        "en_GB": "Validated",
+        "zh_CN": "已验证"
+      }
+    },
+    "supervisors": [
+      {
+        "pureId": 1585427901,
+        "name": {
+          "firstName": "Haonan",
+          "lastName": "Li"
+        },
+        "person": {
+          "systemName": "Person",
+          "uuid": "18ca7b01-cd6b-4a6c-a25b-c2d6629e86fc"
+        },
+        "role": {
+          "uri": "/dk/atira/pure/studentthesis/roles/internalexternal/studentthesis/supervisor",
+          "term": {
+            "en_GB": "Supervisor",
+            "zh_CN": "导师"
+          }
+        }
+      },
+      {
+        "pureId": 1585427902,
+        "name": {
+          "firstName": "Guilin",
+          "lastName": "Yang"
+        },
+        "externalPerson": {
+          "systemName": "ExternalPerson",
+          "uuid": "27a60e6e-0f79-49b9-b4f4-f6a1ad31c597"
+        },
+        "role": {
+          "uri": "/dk/atira/pure/studentthesis/roles/internalexternal/studentthesis/supervisor",
+          "term": {
+            "en_GB": "Supervisor",
+            "zh_CN": "导师"
+          }
+        }
+      },
+      {
+        "pureId": 1585427903,
+        "name": {
+          "firstName": "Gongyu",
+          "lastName": "Liu"
+        },
+        "person": {
+          "systemName": "Person",
+          "uuid": "597beed4-752c-43b9-a2cc-5285f160e0f8"
+        },
+        "role": {
+          "uri": "/dk/atira/pure/studentthesis/roles/internalexternal/studentthesis/supervisor",
+          "term": {
+            "en_GB": "Supervisor",
+            "zh_CN": "导师"
+          }
+        }
+      }
+    ],
+    "awardDate": {
+      "year": 2025,
+      "month": 8,
+      "day": 15
+    },
+    "awardingInstitutions": [
+      {
+        "externalOrganizationRef": {
+          "systemName": "ExternalOrganization",
+          "uuid": "42115359-4128-41c0-a7a6-b24a32da05e8"
+        }
+      }
+    ],
+    "abstract": {
+      "en_GB": "Glass lens is extensively used in optical system, but glass is difficult to machine owing to its brittleness. Brittle damage is generated in rough machining, and the surface quality of glass lens is worsened significantly. The Damage-Controlled Grinding (DCG) strategy is proposed to reduce the brittle damage by reducing the step cut depth in single tool pass while increasing the total number of tool passes. However, the error of machine tools in the workspace limits the reduction of cut depth. Conventional methods conduct error compensation towards each motion axis, but are complicated in derivation and calculation. Nano-Positioning Stage (NPS) may be introduced to directly compensate the total error in workspace, but is seldom employed at present due to the following reasons: (a) low stiffness, (b) low Degree-of-Freedom (DOF), (c) insufficient maximum stroke, and (d) high parasitic shift. <br/>A novel NPS-based DCG strategy is proposed in this thesis to solve this problem, and is realized by four steps:<br/>(i) Determination of NPS stiffness via edge chipping modelling<br/>The stiffness of NPS is determined by the range of cutting parameters, i.e., contact force and cut depth in the DCG of glass to tolerate the impact from the tool. The range of cutting parameters are selected under the criteria of minimizing the brittle damage of glass. Edge Chipping (EC) is one of the most deteriorating brittle damages of glass, but conventional prediction towards its size is inaccurate, because conventional EC analysis treats it as a circle and ignores the influence of strain rate. To address this, a novel EC model is proposed to calculate the shape and size of maximized EC. The model is derived by fracture mechanics and validated by experiments with relative error of less than 6%. Based on the proposed model, the range of contact force and cut depth is determined, so as to find the minimum value of NPS stiffness.<br/>(ii) Structural design of XYZ NPS with a quasi-symmetric structure<br/>NPSs with parallel-type and motion-decoupled XYZ configuration is selected for error compensation, because it can avoid accumulated error and inter-axis coupling. However, in this configuration, conventional asymmetric structure would cause high parasitic shift, while fully-symmetric structure is bulky. A novel Quasi-Symmetric (QS) structure is proposed to solve this problem. The kinetostatic model is established and validated by simulation. The structural parameters are optimized based on the stiffness matching method. Finally, the prototype of QS-NPS is fabricated.<br/>(iii) Performance test and control design of proposed QS-NPS<br/>Performance test and control design of the QS-NPS is necessary before employing the proposed QS-NPS. Tests to the performance of the QS-NPS include linearity, workspace, parasitic shift, stiffness, and resolution. A feedforward control based on hysteresis calibration is employed to all three axes, reaching the accuracy of 1.4% for single-axis tracking and 3.8% for dual-axes tracking with 0.5 N of load. In addition, an admittance control based on force sensor is employed to Z axes. <br/>(iv) NPS-based DCG of glass<br/>The effectiveness of the DCG strategy is validated by experiments and examples fabrication. By employing NPS, the limit of cut depth is exceeded, and the minimal cut depth of 0.25 μm is reached in nano-only and macro-nano combined scratching experiments. The accuracy of 0.25 N in force control is realized. A blank of screw lens is fabricated with 98% of EC reduction and less than 4 μm of Ra under the maximum cut depth of 0.4 mm. A conical lens is proposed by blank fabrication and simple polishing, and its optical performance is validated.<br/>The above four researches realize the DCG of glass by using NPS to compensate the error of machine tool and exceed the limit of step cut depth, and are expected to open new opportunities for the precision machining based on existing machine tools<br/>"
+    },
+    "systemName": "StudentThesis"
+  },
+  "person": {
+    "pureId": 87933555,
+    "uuid": "e3fab8ba-3af3-47b3-a86e-ea6d3dc10eec",
+    "createdBy": "sync_user",
+    "createdDate": "2021-09-08T00:03:28.998+08:00",
+    "modifiedBy": "root",
+    "modifiedDate": "2026-06-29T23:46:58.791522+08:00",
+    "portalUrl": "https://research.nottingham.edu.cn/zh/persons/e3fab8ba-3af3-47b3-a86e-ea6d3dc10eec",
+    "prettyUrlIdentifiers": [
+      "haoyu-shi"
+    ],
+    "version": "6702c835b2e6a65743248269cd6ddb9354f8cee1",
+    "keywordGroups": [
+      {
+        "typeDiscriminator": "ClassificationsKeywordGroup",
+        "pureId": 376051431,
+        "logicalName": "/dk/atira/pure/keywords/person_types",
+        "name": {
+          "en_GB": "Person Types",
+          "zh_CN": "人员类别"
+        },
+        "classifications": [
+          {
+            "uri": "/dk/atira/pure/keywords/person_types/students",
+            "term": {
+              "en_GB": "Students",
+              "zh_CN": "学生"
+            }
+          }
+        ],
+        "keywordContainers": [
+          {
+            "pureId": 376051432,
+            "state": "ACCEPTED",
+            "origin": "USER_SUPPLIED",
+            "structuredKeyword": {
+              "uri": "/dk/atira/pure/keywords/person_types/students",
+              "term": {
+                "en_GB": "Students",
+                "zh_CN": "学生"
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "name": {
+      "firstName": "Haoyu",
+      "lastName": "Shi"
+    },
+    "names": [
+      {
+        "pureId": 87933556,
+        "name": {
+          "firstName": "浩宇",
+          "lastName": "石"
+        },
+        "type": {
+          "uri": "/dk/atira/pure/person/names/translated",
+          "term": {
+            "en_GB": "Translated name",
+            "zh_CN": "译名"
+          }
+        }
+      }
+    ],
+    "orcidAuthenticated": false,
+    "studentOrganizationAssociations": [
+      {
+        "typeDiscriminator": "StudentOrganizationAssociation",
+        "pureId": 87933557,
+        "affiliationId": "20211015",
+        "employmentType": {
+          "uri": "/dk/atira/pure/person/studenttype/phd",
+          "term": {
+            "en_GB": "PhD",
+            "zh_CN": "博士"
+          }
+        },
+        "organization": {
+          "systemName": "Organization",
+          "uuid": "68a9e470-ce5c-497f-8c25-747ae54d3e4f"
+        },
+        "emails": [
+          {
+            "pureId": 87933558,
+            "value": "Haoyu.Shi@nottingham.edu.cn",
+            "type": {
+              "uri": "/dk/atira/pure/person/personemailtype/email",
+              "term": {
+                "en_GB": "Email",
+                "zh_CN": "电子邮件"
+              }
+            }
+          }
+        ],
+        "period": {
+          "startDate": "2019-09-14",
+          "endDate": "2025-08-20"
+        },
+        "primaryAssociation": true
+      }
+    ],
+    "selectedForProfileRefinementService": false,
+    "gender": {
+      "uri": "/dk/atira/pure/person/gender/male",
+      "term": {
+        "en_GB": "Male",
+        "zh_CN": "男性"
+      }
+    },
+    "visibility": {
+      "key": "BACKEND",
+      "description": {
+        "en_GB": "Backend - Restricted to UNNC RIS users",
+        "zh_CN": "后台 - 限于 UNNC RIS 用户"
+      }
+    },
+    "identifiers": [
+      {
+        "typeDiscriminator": "PrimaryId",
+        "idSource": "synchronisedUnifiedPerson",
+        "value": "20211015"
+      },
+      {
+        "typeDiscriminator": "Id",
+        "pureId": 88017079,
+        "idSource": "synchronisedUnifiedPersonWithSupervisors",
+        "value": "20211015"
+      }
+    ],
+    "user": {
+      "systemName": "User",
+      "uuid": "09190a6a-6c8e-4805-ae6b-b460b933ca80"
+    },
+    "customDefinedFields": {},
+    "profiled": false,
+    "systemName": "Person"
+  },
+  "organization": {
+    "pureId": 7721648,
+    "uuid": "68a9e470-ce5c-497f-8c25-747ae54d3e4f",
+    "createdBy": "atira",
+    "createdDate": "2021-04-06T17:01:29.688+08:00",
+    "modifiedBy": "yilia.wang@nottingham.edu.cn",
+    "modifiedDate": "2024-07-05T10:32:48.21+08:00",
+    "portalUrl": "https://research.nottingham.edu.cn/zh/organisations/68a9e470-ce5c-497f-8c25-747ae54d3e4f",
+    "prettyUrlIdentifiers": [
+      "department-of-mechanical-materials-and-manufacturing-engineering"
+    ],
+    "version": "43ad9c6d43908b31043ef2a5e1e0ab59bba63bb9",
+    "name": {
+      "en_GB": "Department of Mechanical, Materials and Manufacturing Engineering",
+      "zh_CN": "机械、材料与制造工程系"
+    },
+    "type": {
+      "uri": "/dk/atira/pure/organisation/organisationtypes/organisation/department",
+      "term": {
+        "en_GB": "Department",
+        "zh_CN": "部门"
+      }
+    },
+    "identifiers": [
+      {
+        "typeDiscriminator": "PrimaryId",
+        "idSource": "synchronisedOrganisation",
+        "value": "10027"
+      },
+      {
+        "typeDiscriminator": "ClassifiedId",
+        "pureId": 7721653,
+        "id": "10027",
+        "type": {
+          "uri": "/dk/atira/pure/organisation/organisationsources/organisationid",
+          "term": {
+            "en_GB": "Organisation ID",
+            "zh_CN": "组织 ID"
+          }
+        }
+      }
+    ],
+    "nameVariants": [
+      {
+        "pureId": 7721650,
+        "type": {
+          "uri": "/dk/atira/pure/organisation/namevariants/shortname",
+          "term": {
+            "en_GB": "Short name",
+            "zh_CN": "简称"
+          }
+        }
+      },
+      {
+        "pureId": 7721651,
+        "value": {
+          "en_GB": "MMM"
+        },
+        "type": {
+          "uri": "/dk/atira/pure/organisation/namevariants/sortname",
+          "term": {
+            "en_GB": "Sort name",
+            "zh_CN": "简称"
+          }
+        }
+      },
+      {
+        "pureId": 7721652,
+        "type": {
+          "uri": "/dk/atira/pure/organisation/namevariants/webname",
+          "term": {
+            "en_GB": "Web name",
+            "zh_CN": "网站名称"
+          }
+        }
+      }
+    ],
+    "profileInformations": [
+      {
+        "pureId": 694739676,
+        "type": {
+          "uri": "/dk/atira/pure/organisation/customfields/organisation_profile",
+          "term": {
+            "en_GB": "Organisation profile",
+            "zh_CN": "组织简介"
+          }
+        }
+      }
+    ],
+    "lifecycle": {
+      "startDate": "2008-09-01"
+    },
+    "parents": [
+      {
+        "systemName": "Organization",
+        "uuid": "3f484e81-a0e1-40a1-8ab2-0e8cea2b101a"
+      }
+    ],
+    "visibility": {
+      "key": "FREE",
+      "description": {
+        "en_GB": "Public - No restriction",
+        "zh_CN": "公开 - 无限制"
+      }
+    },
+    "customDefinedFields": {},
+    "systemName": "Organization"
+  }
+}

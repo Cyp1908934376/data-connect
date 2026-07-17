@@ -155,4 +155,40 @@ public class ExecutionLogFileService {
     private Path getWatermarkPath(Long flowConfigId) {
         return getFlowDir(flowConfigId).resolve("watermark.json");
     }
+
+    private Path getSyncedIdsPath(Long flowConfigId) {
+        return getFlowDir(flowConfigId).resolve("synced-ids.json");
+    }
+
+    /**
+     * Load synced UUID set for SYNCED_SET strategy.
+     */
+    public Set<String> loadSyncedIds(Long flowConfigId) {
+        Path file = getSyncedIdsPath(flowConfigId);
+        if (!Files.exists(file)) return new LinkedHashSet<>();
+        try {
+            String content = new String(Files.readAllBytes(file));
+            List<String> list = objectMapper.readValue(content, new TypeReference<List<String>>() {});
+            return new LinkedHashSet<>(list);
+        } catch (Exception e) {
+            log.warn("同步ID文件读取失败, flowConfigId={}", flowConfigId);
+            return new LinkedHashSet<>();
+        }
+    }
+
+    /**
+     * Save synced UUID set for SYNCED_SET strategy.
+     */
+    public void saveSyncedIds(Long flowConfigId, Set<String> ids) {
+        Path file = getSyncedIdsPath(flowConfigId);
+        try {
+            Files.createDirectories(file.getParent());
+            List<String> list = new ArrayList<>(ids);
+            String json = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(list);
+            Files.write(file, json.getBytes());
+            log.info("同步ID已保存, flowConfigId={}, count={}", flowConfigId, ids.size());
+        } catch (IOException e) {
+            log.error("同步ID文件写入失败, flowConfigId={}", flowConfigId, e);
+        }
+    }
 }

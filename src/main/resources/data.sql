@@ -1099,7 +1099,7 @@ def offset = 0
 def totalCount = 0
 
 while (true) {
-    def pageUrl = "${API_BASE}/student-theses?size=${PAGE_SIZE}&offset=${offset}".toString()
+    def pageUrl = "${API_BASE}/student-theses?size=${PAGE_SIZE}&offset=${offset}".toString().toString()
     def pageResp = http.get(pageUrl, headers)
 
     if (!pageResp.success || pageResp.status != 200) {
@@ -1131,12 +1131,54 @@ def items = allItems.collect { item ->
     def firstContributor = item.contributors?.getAt(0)
     def firstSupervisor = item.supervisors?.getAt(0)
     def firstOrg = item.organizations?.getAt(0)
+    // ---- 通过 Person API 获取学号(affiliationId) ----
+    def personStudentId = ""
+    def enrollmentEndDate = ""
+    def studentAssocs = null
+    def personApiUuid = firstContributor?.person?.uuid
+    if (personApiUuid) {
+        try {
+            def personUrl = "${API_BASE}/persons/${personApiUuid}".toString()
+            def personResp = http.get(personUrl, headers)
+            if (personResp.success && personResp.status == 200) {
+                studentAssocs = personResp.data?.studentOrganizationAssociations
+                if (studentAssocs) {
+                    def assocWithId = studentAssocs.find { it.affiliationId }
+                    if (assocWithId) personStudentId = assocWithId.affiliationId
+                    if (studentAssocs[0]?.period?.endDate) {
+                        enrollmentEndDate = studentAssocs[0].period.endDate
+                    }
+                }
+            }
+        } catch (Exception e) { }
+    }
+    // ---- 通过 Organization API 获取学院名称(supervisorOrganizations) ----
+    def collegeName = ""
+    def supervisorOrgUuid = item.supervisorOrganizations?.getAt(0)?.uuid
+    if (supervisorOrgUuid) {
+        try {
+            def orgUrl = "${API_BASE}/organizations/${supervisorOrgUuid}".toString()
+            def orgResp = http.get(orgUrl, headers)
+            if (orgResp.success && orgResp.status == 200) {
+                collegeName = orgResp.data?.name?.get("zh_CN") ?: orgResp.data?.name?.get("en_GB") ?: ""
+            }
+        } catch (Exception e) { }
+    }
     def date = item.awardDate
+    // 所有标识符(JSON序列化，含PrimaryId及其他如DOI等)
+    def allIdentifiers = item.identifiers ? groovy.json.JsonOutput.toJson(item.identifiers) : ""
+    // SEO友好URL列表
+    def prettyUrls = item.prettyUrlIdentifiers?.join(", ") ?: ""
 
     // ---- 作者信息 (contributors 替代旧 personAssociations) ----
+    // 提取全部作者(可能有多位)
+    def allContributorNames = item.contributors?.collect { c ->
+        "${c?.name?.firstName ?: ""} ${c?.name?.lastName ?: ""}".trim()
+    }?.findAll { it } ?: []
     def authorFirst = firstContributor?.name?.firstName ?: ""
     def authorLast = firstContributor?.name?.lastName ?: ""
-    def authorPersonId = firstContributor?.person?.uuid ?: firstContributor?.externalPerson?.uuid ?: ""
+    def authorPersonId = personStudentId ?: firstContributor?.person?.uuid ?: firstContributor?.externalPerson?.uuid ?: ""
+    def allAuthors = allContributorNames.join("; ")
 
     // ---- 导师信息 ----
     def supervisorFirst = firstSupervisor?.name?.firstName ?: ""
@@ -1144,18 +1186,24 @@ def items = allItems.collect { item ->
     def supervisorPersonId = firstSupervisor?.person?.uuid ?: firstSupervisor?.externalPerson?.uuid ?: ""
     def allSupervisors = item.supervisors?.collect { s ->
         "${s?.name?.firstName ?: ""} ${s?.name?.lastName ?: ""}".trim()
-    }?.findAll { it }?.join("; ") ?: ""
+    }?.findAll { it }?.join(", ") ?: ""
+    // 导师所属机构UUID列表(top-level supervisorOrganizations)
+    def supervisorOrgUuids = item.supervisorOrganizations?.collect { it.uuid }?.findAll { it }?.join(",") ?: ""
 
-    // ---- 关键词 (FreeKeywordsKeywordGroup) ----
-    def freeKwGroup = item.keywordGroups?.find { it.typeDiscriminator == "FreeKeywordsKeywordGroup" }
+    // ---- 授予机构 (awardingInstitutions) ----
+    def awardingInstitution = item.awardingInstitutions?.getAt(0)?.externalOrganizationRef?.uuid ?: ""
+
+    // ---- 关键词 (FreeKeywordsKeywordGroup, logicalName=keywordContainers) ----
+    def freeKwGroup = item.keywordGroups?.find { it.typeDiscriminator == "FreeKeywordsKeywordGroup" && it.logicalName == "keywordContainers" }
     def kwList = freeKwGroup?.keywords?.find { it.locale == "en_GB" }?.freeKeywords
     def keywords = kwList ? kwList.join(", ") : ""
 
-    // ---- 学科分类 (ClassificationsKeywordGroup) ----
-    def classGroup = item.keywordGroups?.find { it.typeDiscriminator == "ClassificationsKeywordGroup" }
+    // ---- 学科分类 (ClassificationsKeywordGroup, logicalName=librarySubjects) ----
+    // 注意: API可能返回多种ClassificationsKeywordGroup(如librarySubjects/waiver/supervisorDiscussion), 必须按logicalName过滤
+    def classGroup = item.keywordGroups?.find { it.typeDiscriminator == "ClassificationsKeywordGroup" && it.logicalName == "librarySubjects" }
     def subjectTerms = classGroup?.classifications?.collect { it.term }
-    def subjects = subjectTerms?.collect { it."en_GB" }?.findAll { it }?.join("; ") ?: ""
-    def subjectsZh = subjectTerms?.collect { it."zh_CN" }?.findAll { it }?.join("; ") ?: ""
+    def subjects = subjectTerms?.collect { it."en_GB" }?.findAll { it }?.join(", ") ?: ""
+    def subjectsZh = subjectTerms?.collect { it."zh_CN" }?.findAll { it }?.join(", ") ?: ""
 
     // ---- 摘要 (扁平对象 en_GB/zh_CN，非数组) ----
     def abstractEn = item.abstract?.get("en_GB") ?: ""
@@ -1188,7 +1236,11 @@ def items = allItems.collect { item ->
         return doc
     }
     // 仅 PDF 类型的文档
-    def pdfDocs = documents?.findAll { it.mimeType == "application/pdf" } ?: []
+    def pdfDocs = documents?.findAll { it.fileId && !(it.fileName?.contains("changehistory")) } ?: []
+    // 文档embargo日期(第一个PDF的embargoDate)
+    def docEmbargoDate = pdfDocs.getAt(0)?.embargoDate ?: ""
+    // 文档可见性(第一个PDF的visibility)
+    def docVisibility = pdfDocs.getAt(0)?.visibility?.key ?: ""
 
     // ====== 扁平字段 ======
     item.id = primaryId?.value ?: item.uuid ?: ""               // eprint ID 或 UUID
@@ -1201,21 +1253,26 @@ def items = allItems.collect { item ->
     item.createdDate = item.createdDate ?: ""                   // 创建日期
     item.modifiedBy = item.modifiedBy ?: ""                     // 修改者
     item.modifiedDate = item.modifiedDate ?: ""                 // 修改日期
+    item.prettyUrlIdentifiers = prettyUrls                      // SEO友好URL列表(分号分隔)
 
     // 作者
     item.author = "${authorFirst} ${authorLast}".trim()
     item.authorFirst = authorFirst
     item.authorLast = authorLast
     item.authorPersonId = authorPersonId
+    item.allAuthors = allAuthors                                // 全部作者(分号分隔, 含多位作者)
 
     // 导师
-    item.supervisor = "${supervisorFirst} ${supervisorLast}".trim()
+    item.supervisor = allSupervisors
     item.supervisors = allSupervisors
     item.supervisorPersonId = supervisorPersonId
+    item.supervisorOrgUuids = supervisorOrgUuids                // 导师所属机构UUID列表(逗号分隔)
 
     // 院系 (organizations 只有 uuid，此处保留 UUID 引用)
-    item.orgUuid = firstOrg?.uuid ?: ""
+    item.orgUuid = collegeName ?: firstOrg?.uuid ?: ""
     item.managingOrgUuid = item.managingOrganization?.uuid ?: ""
+    item.allIdentifiers = allIdentifiers                        // 所有外部标识符(JSON数组: 含PrimaryId及DOI等)
+    item.awardingInstitution = awardingInstitution              // 学位授予机构UUID
 
     // 学位 & 语言
     item.degree = degreeEn
@@ -1250,6 +1307,8 @@ def items = allItems.collect { item ->
     item.pdf_url = pdfDocs.getAt(0)?.downloadUrl ?: ""
     item.pdf_fileName = pdfDocs.getAt(0)?.fileName ?: ""
     item.pdf_size = pdfDocs.getAt(0)?.size ?: 0
+    item.docEmbargoDate = docEmbargoDate                        // PDF embargo日期(可能为空)
+    item.docVisibility = docVisibility                          // PDF可见性KEY(FREE/CAMPUS/BACKEND/CONFIDENTIAL)
 
     // 下载后的本地路径（由下方下载阶段填充）
     item.pdf_localPath = ""
@@ -1571,7 +1630,7 @@ conn.setRequestProperty("token", token)
 conn.setConnectTimeout(30000)
 conn.setReadTimeout(120000)
 
-def fileName = (input?.title?.toString() ?: "document") + ".pdf"
+def fileName = (input?.fileName?.toString() ?: input?.title?.toString() ?: "document") + ".pdf"
 fileName = fileName.replaceAll("[\\\\/:*?\"<>|]", "_")
 
 // Build multipart body
@@ -1638,8 +1697,8 @@ MERGE INTO flow_config (id, name, description, input_ds_id, output_ds_id, sync_s
 
 -- 列配置：论文数据源输出字段（匹配真实API结构 + 扁平兼容字段）
 MERGE INTO column_config (id, name, description, column_type, columns_json) KEY(id) VALUES
-(201, '论文数据字段(输入)', '诺丁汉论文API输出的完整字段定义（含uuid、documents附件数组及自动构建的downloadUrl）', 'RECEIVE',
- '[{"key":"id","value":"论文编号(eprint ID或UUID)"},{"key":"pureId","value":"Pure系统ID"},{"key":"uuid","value":"UUID(下载必需)"},{"key":"title","value":"论文标题"},{"key":"portalUrl","value":"门户页面URL"},{"key":"version","value":"版本号"},{"key":"createdBy","value":"创建者"},{"key":"createdDate","value":"创建日期"},{"key":"modifiedBy","value":"修改者"},{"key":"modifiedDate","value":"修改日期"},{"key":"author","value":"作者全名"},{"key":"authorFirst","value":"作者名"},{"key":"authorLast","value":"作者姓"},{"key":"authorPersonId","value":"作者Person UUID"},{"key":"supervisor","value":"第一导师全名"},{"key":"supervisors","value":"全部导师(分号分隔)"},{"key":"supervisorPersonId","value":"导师Person UUID"},{"key":"orgUuid","value":"所属机构UUID"},{"key":"managingOrgUuid","value":"管理组织UUID"},{"key":"degree","value":"学位类型(英文)"},{"key":"degreeZh","value":"学位类型(中文)"},{"key":"language","value":"语言(英文)"},{"key":"languageZh","value":"语言(中文)"},{"key":"publishYear","value":"授予年份"},{"key":"submissionDate","value":"授予日期(yyyy-MM-dd)"},{"key":"abstract_en","value":"英文摘要"},{"key":"abstract_cn","value":"中文摘要"},{"key":"keywords","value":"自由关键词(逗号分隔)"},{"key":"subjects","value":"学科分类(英文)"},{"key":"subjectsZh","value":"学科分类(中文)"},{"key":"visibility","value":"可见性KEY"},{"key":"visibilityDesc","value":"可见性描述(英文)"},{"key":"visibilityDescZh","value":"可见性描述(中文)"},{"key":"status","value":"工作流状态KEY"},{"key":"statusDesc","value":"工作流状态描述(英文)"},{"key":"statusDescZh","value":"工作流状态描述(中文)"},{"key":"documents","value":"全部附件(含downloadUrl)"},{"key":"pdf_count","value":"PDF附件数量"},{"key":"pdf_url","value":"第一PDF下载地址"},{"key":"pdf_fileName","value":"第一PDF文件名"},{"key":"pdf_size","value":"第一PDF文件大小(字节)"}]');
+(201, '论文数据字段(输入)', '诺丁汉论文API输出的完整字段定义（含uuid、documents附件数组及自动构建的downloadUrl、embargo信息、多作者等）', 'RECEIVE',
+ '[{"key":"id","value":"论文唯一标识(eprint ID优先, 回退UUID)"},{"key":"pureId","value":"Pure系统内部ID"},{"key":"uuid","value":"UUID(下载附件必需)"},{"key":"title","value":"论文标题"},{"key":"portalUrl","value":"门户页面URL"},{"key":"prettyUrlIdentifiers","value":"SEO友好URL列表(分号分隔)"},{"key":"version","value":"版本号(用于并发控制)"},{"key":"createdBy","value":"创建者用户名"},{"key":"createdDate","value":"创建日期"},{"key":"modifiedBy","value":"最后修改者用户名"},{"key":"modifiedDate","value":"最后修改日期"},{"key":"allIdentifiers","value":"所有外部标识符(JSON数组: 含PrimaryId/DOI等)"},{"key":"author","value":"第一作者全名"},{"key":"authorFirst","value":"第一作者名"},{"key":"authorLast","value":"第一作者姓"},{"key":"authorPersonId","value":"第一作者Person UUID"},{"key":"allAuthors","value":"全部作者(分号分隔, 含多位作者)"},{"key":"supervisor","value":"第一导师全名"},{"key":"supervisors","value":"全部导师(分号分隔, 含内外导师)"},{"key":"supervisorPersonId","value":"第一导师Person UUID"},{"key":"supervisorOrgUuids","value":"导师所属机构UUID列表(逗号分隔)"},{"key":"orgUuid","value":"第一所属机构UUID"},{"key":"managingOrgUuid","value":"管理组织UUID(论文归属管理部门)"},{"key":"awardingInstitution","value":"学位授予机构UUID"},{"key":"degree","value":"学位类型(英文, 如PhD Thesis)"},{"key":"degreeZh","value":"学位类型(中文, 如学术博士论文)"},{"key":"language","value":"语言(英文, 如English)"},{"key":"languageZh","value":"语言(中文, 如英语)"},{"key":"publishYear","value":"授予年份"},{"key":"submissionDate","value":"授予日期(yyyy-MM-dd格式)"},{"key":"abstract_en","value":"英文摘要"},{"key":"abstract_cn","value":"中文摘要"},{"key":"keywords","value":"自由关键词(逗号分隔, 英文)"},{"key":"subjects","value":"学科分类(英文, 分号分隔)"},{"key":"subjectsZh","value":"学科分类(中文, 分号分隔)"},{"key":"visibility","value":"可见性KEY(FREE/CAMPUS/BACKEND/CONFIDENTIAL)"},{"key":"visibilityDesc","value":"可见性描述(英文)"},{"key":"visibilityDescZh","value":"可见性描述(中文)"},{"key":"status","value":"工作流状态KEY(如approved/draft)"},{"key":"statusDesc","value":"工作流状态描述(英文)"},{"key":"statusDescZh","value":"工作流状态描述(中文)"},{"key":"documents","value":"全部附件数组(含自动构建的downloadUrl)"},{"key":"pdf_count","value":"PDF附件数量"},{"key":"pdf_url","value":"首个PDF下载地址(需Api-Key认证)"},{"key":"pdf_fileName","value":"首个PDF文件名"},{"key":"pdf_size","value":"首个PDF文件大小(字节)"},{"key":"docEmbargoDate","value":"PDF embargo日期(可能为空)"},{"key":"docVisibility","value":"PDF可见性KEY(FREE/CAMPUS/BACKEND/CONFIDENTIAL)"},{"key":"pdf_localPath","value":"PDF下载后本地路径(仅downloadFiles=true时有值)"},{"key":"pdf_downloaded","value":"PDF是否已下载到本地(true/false)"},{"key":"pdf_downloadError","value":"PDF下载失败原因(成功时为空)"}]');
 
 -- 列配置：档案表目标字段
 MERGE INTO column_config (id, name, description, column_type, columns_json) KEY(id) VALUES
@@ -1648,8 +1707,8 @@ MERGE INTO column_config (id, name, description, column_type, columns_json) KEY(
 
 -- 字段映射模板：论文字段 → 档案表字段
 MERGE INTO mapping_template (id, name, description, ds_config_id, column_config_id, mappings) KEY(id) VALUES
-(201, '论文→档案字段映射(lwdj)', '将诺丁汉论文数据的英文字段映射到档案系统lwdj表的中文字段', 401, 202,
- '[{"receiveKey":"title","pushKey":"title"},{"receiveKey":"author","pushKey":"author"},{"receiveKey":"orgUuid","pushKey":"c1"},{"receiveKey":"degree","pushKey":"c2"},{"receiveKey":"publishYear","pushKey":"c3"},{"receiveKey":"submissionDate","pushKey":"nd"},{"receiveKey":"pdf_count","pushKey":"bgq"},{"receiveKey":"supervisor","pushKey":"dw"},{"receiveKey":"id","pushKey":"djsj"},{"receiveKey":"keywords","pushKey":"ztc"},{"receiveKey":"abstract_cn","pushKey":"tx"}]');
+(201, '论文→档案字段映射(lwdj)', '将诺丁汉论文数据映射到档案系统lwdj表。映射说明: title→题名, author→责任者(第一作者), allAuthors→合著者, orgUuid→一级目录, degree→二级目录, publishYear→三级目录, submissionDate→年度, submissionDate→登记时间, managingOrgUuid→单位, keywords→主题词, abstract_cn→提要, docEmbargoDate/docVisibility→扩展字段', 401, 202,
+ '[{"receiveKey":"title","pushKey":"title"},{"receiveKey":"author","pushKey":"author"},{"receiveKey":"allAuthors","pushKey":"hzz"},{"receiveKey":"orgUuid","pushKey":"c1"},{"receiveKey":"degree","pushKey":"c2"},{"receiveKey":"publishYear","pushKey":"c3"},{"receiveKey":"submissionDate","pushKey":"nd"},{"receiveKey":"submissionDate","pushKey":"djsj"},{"receiveKey":"managingOrgUuid","pushKey":"dw"},{"receiveKey":"keywords","pushKey":"ztc"},{"receiveKey":"abstract_cn","pushKey":"tx"},{"receiveKey":"docEmbargoDate","pushKey":"fdext1"},{"receiveKey":"docVisibility","pushKey":"fdext2"}]');
 
 -- ============================================
 -- 更新流程：加上字段映射管线步骤
@@ -1793,7 +1852,7 @@ out.maskey = maskey
 // ======================
 def pdfBytes = null
 def pdfUrl = input?.pdf_url?.toString()
-def fileName = (input?.title?.toString() ?: "document") + ".pdf"
+def fileName = (input?.fileName?.toString() ?: input?.title?.toString() ?: "document") + ".pdf"
 fileName = fileName.replaceAll("[\\\\/:*?\"<>|]", "_")
 
 if (pdfUrl) {
@@ -2007,88 +2066,991 @@ if (!maskey) {
 out.maskey = maskey
 
 // ======================
-// Phase 3: 获取PDF
+// Phase 3+4: 下载所有PDF附件并上传（循环 documents[] 中所有 mimeType=application/pdf 的文件）
 // ======================
-def pdfBytes = null
-def pdfUrl = input?.pdf_url?.toString()
-def fileName = (input?.title?.toString() ?: "document") + ".pdf"
-fileName = fileName.replaceAll("[\\/:*?\"<>|]", "_")
+// 从 input.documents 获取所有文档（JSON字符串，由上游管线保留）
+def allDocuments = []
+def docRaw = input?.documents
+if (docRaw) {
+    try {
+        def parsed = new JsonSlurper().parseText(docRaw)
+        if (parsed instanceof List) allDocuments = parsed
+    } catch (Exception e) {
+        out.success = false; out.error = "documents JSON解析失败: " + e.message; return
+    }
+}
 
-if (pdfUrl) {
+// 过滤PDF文档：有mimeType的直接匹配，没有则根据url后缀判断
+def pdfDocs = allDocuments.findAll {
+    def mime = it?.mimeType?.toString()
+    if (mime) return mime == "application/pdf"
+    def url = it?.downloadUrl?.toString() ?: it?.url?.toString() ?: ""
+    return url.toLowerCase().endsWith(".pdf")
+}
+if (pdfDocs.isEmpty()) {
+    out.success = false
+    out.error = "documents中没有PDF文件 (共" + allDocuments.size() + "个文档)"
+    return
+}
+
+def uploadedFiles = []
+def failedFiles = []
+def CRLF = "\r\n"
+
+pdfDocs.each { doc ->
+    def pdfUrl = doc?.downloadUrl?.toString() ?: doc?.url?.toString()
+    // 优先用fileName字段，没有则从URL提取文件名
+    def docFileName = doc?.fileName?.toString()
+    if (!docFileName && pdfUrl) {
+        docFileName = pdfUrl.tokenize("/").last() ?: "document.pdf"
+    }
+    if (!docFileName) docFileName = "document.pdf"
+    docFileName = docFileName.replaceAll("[\\\\/:*?\"<>|]", "_")
+
+    if (!pdfUrl) {
+        failedFiles.add([fileName: docFileName, error: "No downloadUrl"])
+        return
+    }
+
+    // 下载PDF
+    def pdfBytes = null
     try {
         def pdfConn = new URL(pdfUrl).openConnection()
         pdfConn.setConnectTimeout(10000)
         pdfConn.setReadTimeout(30000)
-        // 诺丁汉文件下载API需要 Api-Key 认证
         if (pdfUrl.contains("nottingham")) {
             pdfConn.setRequestProperty("Api-Key", NOTT_API_KEY)
         }
         pdfBytes = pdfConn.getInputStream().bytes
-        out.pdfSource = "downloaded"
     } catch (Exception e) {
-        out.pdfDownloadError = e.message
-        pdfBytes = null
+        failedFiles.add([fileName: docFileName, error: "Download: " + e.message])
+        return
+    }
+    if (!pdfBytes) {
+        failedFiles.add([fileName: docFileName, error: "Empty response"])
+        return
+    }
+
+    // 上传附件 (add_file_tx)
+    try {
+        def boundary = "----DataConnect" + System.currentTimeMillis()
+        def txUrl = new URL(API_BASE + "/open_api/add_file_tx")
+        def conn = (HttpURLConnection) txUrl.openConnection()
+        conn.setDoOutput(true)
+        conn.setRequestMethod("POST")
+        conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary)
+        conn.setRequestProperty("token", token)
+        conn.setConnectTimeout(30000)
+        conn.setReadTimeout(120000)
+
+        def outStream = conn.getOutputStream()
+        def writer = new OutputStreamWriter(outStream, "UTF-8")
+
+        writer.write("--" + boundary + CRLF)
+        writer.write("Content-Disposition: form-data; name=\"maskey\"" + CRLF + CRLF)
+        writer.write(maskey + CRLF)
+
+        writer.write("--" + boundary + CRLF)
+        writer.write("Content-Disposition: form-data; name=\"filename\"" + CRLF + CRLF)
+        writer.write(docFileName + CRLF)
+
+        writer.write("--" + boundary + CRLF)
+        writer.write("Content-Disposition: form-data; name=\"file\"; filename=\"" + docFileName + "\"" + CRLF)
+        writer.write("Content-Type: application/pdf" + CRLF + CRLF)
+        writer.flush()
+        outStream.write(pdfBytes)
+        outStream.flush()
+        writer.write(CRLF)
+
+        writer.write("--" + boundary + "--" + CRLF)
+        writer.flush()
+        writer.close()
+
+        def txCode = conn.getResponseCode()
+        def txStream = (txCode == 200) ? conn.getInputStream() : conn.getErrorStream()
+        def txText = txStream.getText("UTF-8")
+        def txResult = new JsonSlurper().parseText(txText)
+        conn.disconnect()
+
+        if (txResult.code == 0 || txResult.code == 200) {
+            uploadedFiles.add([fileName: docFileName, fileSize: pdfBytes.length])
+        } else {
+            failedFiles.add([fileName: docFileName, error: txResult.msg ?: "Upload failed"])
+        }
+    } catch (Exception e) {
+        failedFiles.add([fileName: docFileName, error: "Upload: " + e.message])
     }
 }
-if (!pdfBytes) {
-    out.pdfSource = "download failed"
-    out.pdfDownloadError = pdfUrl ? "Cannot download: " + pdfUrl : "No pdf_url available"
+
+out.pdfSource = "downloaded"
+out.uploadedFiles = uploadedFiles
+out.failedFiles = failedFiles
+
+if (uploadedFiles.isEmpty()) {
     out.success = false
-    out.error = "PDF download failed: " + (out.pdfDownloadError ?: "unknown error")
+    out.error = "所有PDF上传失败: " + failedFiles.collect{it.fileName + "(" + it.error + ")"}.join(", ")
     return
 }
 
-// ======================
-// Phase 4: 上传附件 (add_file_tx)
-// ======================
-def boundary = "----DataConnect" + System.currentTimeMillis()
-def txUrl = new URL(API_BASE + "/open_api/add_file_tx")
-def conn = (HttpURLConnection) txUrl.openConnection()
-conn.setDoOutput(true)
-conn.setRequestMethod("POST")
-conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary)
-conn.setRequestProperty("token", token)
-conn.setConnectTimeout(30000)
-conn.setReadTimeout(120000)
-
-def CRLF = "\r\n"
-def outStream = conn.getOutputStream()
-def writer = new OutputStreamWriter(outStream, "UTF-8")
-
-writer.write("--" + boundary + CRLF)
-writer.write("Content-Disposition: form-data; name=\"maskey\"" + CRLF + CRLF)
-writer.write(maskey + CRLF)
-
-writer.write("--" + boundary + CRLF)
-writer.write("Content-Disposition: form-data; name=\"filename\"" + CRLF + CRLF)
-writer.write(fileName + CRLF)
-
-writer.write("--" + boundary + CRLF)
-writer.write("Content-Disposition: form-data; name=\"file\"; filename=\"" + fileName + "\"" + CRLF)
-writer.write("Content-Type: application/pdf" + CRLF + CRLF)
-writer.flush()
-outStream.write(pdfBytes)
-outStream.flush()
-writer.write(CRLF)
-
-writer.write("--" + boundary + "--" + CRLF)
-writer.flush()
-writer.close()
-
-def txCode = conn.getResponseCode()
-def txStream = (txCode == 200) ? conn.getInputStream() : conn.getErrorStream()
-def txText = txStream.getText("UTF-8")
-def txResult = new JsonSlurper().parseText(txText)
-conn.disconnect()
-
-if (txResult.code == 0 || txResult.code == 200) {
-    out.success = true
-    out.fileName = fileName
-    out.fileSize = pdfBytes.length
-    out.message = "档案+附件上传成功: " + fileName + " (" + pdfBytes.length + " bytes)"
-} else {
-    out.success = true
-    out.fileUploadError = txResult.msg
-    out.message = "档案元数据已创建, 但附件上传失败: " + (txResult.msg ?: "")
-}',
+out.success = true
+out.fileNames = uploadedFiles.collect { it.fileName }
+out.totalSize = uploadedFiles.sum { it.fileSize ?: 0 }
+out.message = "档案+附件上传完成: " + uploadedFiles.size() + " 个成功" + (failedFiles.isEmpty() ? "" : ", " + failedFiles.size() + " 个失败")',
 'CUSTOM', '档案系统,add_file,add_file_tx,合并,PDF上传', 0, 1);
+
+-- ============================================
+-- 论文归档对接：file2Archives（生成元数据.xml + 打包ZIP + 推送档案系统）
+-- 使用 ARCHIVE 模式 API 数据源，配合 ThesisArchiveService
+-- ============================================
+
+-- 列配置：论文归档元数据字段（对应电子档案元数据XML）
+MERGE INTO column_config (id, name, description, column_type, columns_json) KEY(id) VALUES
+(301, '论文归档元数据字段(输出)', '电子档案元数据XML中的论文业务字段定义，由管线映射后将值填入元数据.xml', 'PUSH',
+ '[{"key":"一级目录","value":"一级目录(固定JX)"},{"key":"二级目录","value":"二级目录(固定JX12)"},{"key":"三级目录","value":"三级目录(固定JX1212)"},{"key":"全宗号","value":"全宗号(固定2)"},{"key":"实体分类号","value":"实体分类号(自动拼:年份-三级目录)"},{"key":"文件号","value":"文件号(流水号)"},{"key":"密级","value":"密级(固定内部)"},{"key":"正题名","value":"正题名(硕士/博士论文——标题)"},{"key":"姓名","value":"学生姓名"},{"key":"学号","value":"学号"},{"key":"导师姓名","value":"导师姓名"},{"key":"专业","value":"专业"},{"key":"学院","value":"学院"},{"key":"页数","value":"PDF页数"},{"key":"时间","value":"毕业时间(YYYYMMDD)"},{"key":"主题词","value":"主题词"},{"key":"第一责任者","value":"第一责任者(默认同姓名)"},{"key":"归档单位","value":"归档单位(默认同学院)"},{"key":"归档份数","value":"归档份数(固定1)"},{"key":"存址","value":"存址"},{"key":"保管期限","value":"保管期限(固定长期)"},{"key":"载体","value":"载体(固定电子文件)"},{"key":"文本","value":"文本(固定正本)"},{"key":"国籍","value":"国籍(默认中国)"},{"key":"性别","value":"性别"},{"key":"入校日期","value":"入校日期(YYYYMMDD)"},{"key":"离校日期","value":"离校日期(YYYYMMDD)"},{"key":"培养类型","value":"培养类型(默认普通全日制)"},{"key":"培养层次","value":"培养层次(硕士研究生/博士研究生)"},{"key":"学籍变更","value":"学籍变更"},{"key":"来源","value":"来源(固定论文系统)"},{"key":"标识","value":"唯一标识(fileIdentifierCode)"}]');
+
+-- 论文归档输出数据源：ARCHIVE模式，推送ZIP到 /open_api/file2Archives
+MERGE INTO ds_config (id, name, description, source_type, api_method, api_url, api_timeout, api_mode, api_auth_type, api_auth_config, api_body, enabled) KEY(id) VALUES
+(601, '档案系统-论文归档(file2Archives)', 'ARCHIVE模式：生成元数据.xml + 打包PDF/OFD为ZIP + 推送到档案系统 /open_api/file2Archives。ccode默认lwdj，fileIdentifierCode取自映射后的标识字段', 'API', 'POST', 'https://docmgt.nottingham.edu.cn/Archives/open_api/file2Archives', 120, 'ARCHIVE', 'NONE', '{"ccode":"PhD","fileIdentifierField":"标识","appkey":"sysadmin","password":"UNNCunnc1"}', '[{"tag":"一级目录","source":"一级目录","default":"{year}"},{"tag":"二级目录","source":"二级目录","default":"JX16"},{"tag":"三级目录","source":"三级目录","default":""},{"tag":"全宗号","source":"全宗号","default":"0289"},{"tag":"实体分类号","source":"实体分类号","default":"{year}-{c2}"},{"tag":"案卷号","source":"案卷号","default":""},{"tag":"文件号","source":"文件号","default":""},{"tag":"密级","source":"密级","default":"内部"},{"tag":"正题名","source":"正题名","default":"宁波诺丁汉大学{姓名}({学号}){学位}及评审材料 ({title})"},{"tag":"信息分类号","source":"信息分类号","default":"{authorPersonId}"},{"tag":"合作者","source":"合作者","default":"{supervisor}"},{"tag":"档案馆室代号","source":"","default":""},{"tag":"主题词","source":"主题词","default":"{orgUuid}"},{"tag":"时间","source":"时间","default":"{timeVal}"},{"tag":"第一责任者","source":"第一责任者","default":"{姓名}"},{"tag":"责任者","source":"","default":"宁波诺丁汉大学"},{"tag":"单位","source":"单位","default":"{学院}"},{"tag":"归档份数","source":"归档份数","default":"1"},{"tag":"保管期限","source":"保管期限","default":"长期"},{"tag":"载体","source":"载体","default":"电子文件"},{"tag":"文本","source":"文本","default":"正本"},{"tag":"获奖等级","source":"","default":""},{"tag":"获奖时间","source":"","default":""},{"tag":"归档时间","source":"","default":"{now}"},{"tag":"存址","source":"存址","default":"{学位}"},{"tag":"学籍变更","source":"学籍变更","default":""},{"tag":"输入员","source":"输入员","default":"论文系统"},{"tag":"标识","source":"","default":"论文系统"}]', 1);
+
+-- 论文字段 → 论文归档元数据 映射模板
+MERGE INTO mapping_template (id, name, description, ds_config_id, column_config_id, push_column_config_id, mappings) KEY(id) VALUES
+(301, '论文→归档元数据映射', '将论文数据源字段映射到电子档案元数据XML的各元素', 401, 201, 301,
+ '[{"receiveKey":"c1","pushKey":"一级目录"},{"receiveKey":"c2","pushKey":"二级目录"},{"receiveKey":"c3","pushKey":"三级目录"},{"receiveKey":"qzh","pushKey":"全宗号"},{"receiveKey":"ztm","pushKey":"正题名"},{"receiveKey":"author","pushKey":"姓名"},{"receiveKey":"authorId","pushKey":"学号"},{"receiveKey":"supervisor","pushKey":"导师姓名"},{"receiveKey":"major","pushKey":"专业"},{"receiveKey":"college","pushKey":"学院"},{"receiveKey":"pdfCount","pushKey":"页数"},{"receiveKey":"submissionDate","pushKey":"时间"},{"receiveKey":"ztc","pushKey":"主题词"},{"receiveKey":"author","pushKey":"第一责任者"},{"receiveKey":"college","pushKey":"归档单位"},{"receiveKey":"gender","pushKey":"性别"},{"receiveKey":"enrollDate","pushKey":"入校日期"},{"receiveKey":"gradDate","pushKey":"离校日期"},{"receiveKey":"cultivateType","pushKey":"培养类型"},{"receiveKey":"cultivateLevel","pushKey":"培养层次"},{"receiveKey":"id","pushKey":"标识"}]');
+
+-- 示例流程：论文归档对接（DB/API → file2Archives）
+MERGE INTO flow_config (id, name, description, input_ds_id, output_ds_id, sync_strategy, pipeline_config) KEY(id) VALUES
+(501, '论文归档-推送档案系统(file2Archives)', '从论文数据源读取 → 字段映射为元数据字段 → 生成元数据.xml + 打包PDF/OFD为ZIP → 推送到档案系统 /open_api/file2Archives', 401, 601, 'FULL', '[{"position":"AFTER_READ","name":"论文字段映射为元数据字段","steps":[{"type":"MAPPING","mappingTemplateId":301}]}]');
+
+-- ============================================
+-- 修正：论文归档映射模板（使用诺丁汉数据源实际字段名作为 receiveKey）
+-- 与 mapping_template 201 风格一致：直接从原始数据字段映射到元数据XML元素
+-- 注：一级目录/二级目录/三级目录/全宗号/密级/保管期限/载体/文本/来源/归档份数
+--      等固定值由 ThesisArchiveService 自动填入，无需在映射中配置
+-- ============================================
+UPDATE mapping_template SET mappings =
+ '[{"receiveKey":"author","pushKey":"姓名"},{"receiveKey":"authorPersonId","pushKey":"学号"},{"receiveKey":"supervisor","pushKey":"导师姓名"},{"receiveKey":"subjectsZh","pushKey":"专业"},{"receiveKey":"orgUuid","pushKey":"学院"},{"receiveKey":"keywords","pushKey":"主题词"},{"receiveKey":"submissionDate","pushKey":"时间"},{"receiveKey":"submissionDate","pushKey":"离校日期"},{"receiveKey":"degreeZh","pushKey":"培养层次"},{"receiveKey":"uuid","pushKey":"标识"},{"receiveKey":"title","pushKey":"title"},{"receiveKey":"pdf_count","pushKey":"pdf_count"},{"receiveKey":"pdf_url","pushKey":"pdf_url"},{"receiveKey":"pdf_fileName","pushKey":"pdf_fileName"},{"receiveKey":"documents","pushKey":"documents"}]'
+ WHERE id = 301;
+
+-- ============================================
+-- 修正映射：严格按元数据.xml模板字段，从诺丁汉数据源映射
+-- 固定值字段(一级目录/二级目录/全宗号/密级/保管期限/载体/文本/来源等)
+-- 由 ThesisArchiveService 自动填入，映射中仅列出源数据有的动态字段
+-- ============================================
+UPDATE mapping_template SET mappings =
+ '[{"receiveKey":"author","pushKey":"姓名"},{"receiveKey":"authorPersonId","pushKey":"学号"},{"receiveKey":"supervisor","pushKey":"导师姓名"},{"receiveKey":"subjectsZh","pushKey":"专业"},{"receiveKey":"orgUuid","pushKey":"学院"},{"receiveKey":"submissionDate","pushKey":"时间"},{"receiveKey":"keywords","pushKey":"主题词"},{"receiveKey":"author","pushKey":"第一责任者"},{"receiveKey":"orgUuid","pushKey":"归档单位"},{"receiveKey":"submissionDate","pushKey":"离校日期"},{"receiveKey":"degreeZh","pushKey":"培养层次"},{"receiveKey":"uuid","pushKey":"标识"},{"receiveKey":"pdf_count","pushKey":"pdf_count"},{"receiveKey":"pdf_url","pushKey":"pdf_url"},{"receiveKey":"pdf_fileName","pushKey":"pdf_fileName"},{"receiveKey":"documents","pushKey":"documents"},{"receiveKey":"title","pushKey":"title"}]'
+ WHERE id = 301;
+
+
+
+-- ============================================
+-- 修复模板505：XML空值字段不输出标签
+-- 新增流程407：论文归档标准对接流程（含完整配置）
+-- ============================================
+
+
+-- ============================================
+-- 新增 407：论文归档标准对接流程（含诺丁汉数据源 + 字段映射 + 归档输出）
+-- ============================================
+MERGE INTO flow_config (id, name, description, input_ds_id, output_ds_id, sync_strategy, pipeline_config) KEY(id) VALUES
+(407, '诺丁汉论文-归档到档案系统(file2Archives)', '标准论文归档流程：诺丁汉论文数据源(401) → 字段映射为归档元数据(映射模板301) → 生成元数据.xml+打包PDF+推送 /open_api/file2Archives(数据源505)', 401, 505, 'FULL', '[{"position":"AFTER_READ","name":"论文字段映射为元数据字段","steps":[{"type":"MAPPING","mappingTemplateId":301}]}]');
+
+
+UPDATE column_config SET columns_json =
+ '[{"key":"一级目录","value":"一级目录(固定JX)"},{"key":"二级目录","value":"二级目录(JX16)"},{"key":"三级目录","value":"三级目录(JX1212)"},{"key":"全宗号","value":"全宗号(0289)"},{"key":"实体分类号","value":"实体分类号(年份-二级目录)"},{"key":"案卷号","value":"案卷号(流水号)"},{"key":"文件号","value":"文件号(可空)"},{"key":"密级","value":"密级(内部)"},{"key":"正题名","value":"正题名(学位前缀+标题)"},{"key":"姓名","value":"学生姓名"},{"key":"学号","value":"学号"},{"key":"导师姓名","value":"导师姓名"},{"key":"专业","value":"专业"},{"key":"学院","value":"学院"},{"key":"页数","value":"PDF页数"},{"key":"时间","value":"毕业时间(YYYYMMDD)"},{"key":"主题词","value":"主题词"},{"key":"第一责任者","value":"第一责任者"},{"key":"归档单位","value":"归档单位"},{"key":"归档份数","value":"归档份数"},{"key":"存址","value":"存址"},{"key":"保管期限","value":"保管期限(长期)"},{"key":"载体","value":"载体(电子文件)"},{"key":"文本","value":"文本(正本)"},{"key":"国籍","value":"国籍(中国)"},{"key":"性别","value":"性别"},{"key":"入校日期","value":"入校日期(YYYYMMDD)"},{"key":"离校日期","value":"离校日期(YYYYMMDD)"},{"key":"培养类型","value":"培养类型(普通全日制)"},{"key":"培养层次","value":"培养层次"},{"key":"学籍变更","value":"学籍变更"},{"key":"来源","value":"来源(论文系统)"},{"key":"标识","value":"唯一标识"},{"key":"签章信息","value":"签章信息(JSON)"}]'
+WHERE id = 301;
+
+
+
+-- 更新映射模板：源字段→u_lwdj列名
+UPDATE mapping_template SET mappings =
+ '[{"receiveKey":"author","pushKey":"zrz"},{"receiveKey":"authorPersonId","pushKey":"fdext3"},{"receiveKey":"supervisor","pushKey":"fdext4"},{"receiveKey":"subjectsZh","pushKey":"fdext5"},{"receiveKey":"orgUuid","pushKey":"dw"},{"receiveKey":"submissionDate","pushKey":"sj"},{"receiveKey":"keywords","pushKey":"ztc"},{"receiveKey":"degreeZh","pushKey":"fdext2"},{"receiveKey":"uuid","pushKey":"fdext6"},{"receiveKey":"title","pushKey":"title"},{"receiveKey":"pdf_count","pushKey":"pdf_count"},{"receiveKey":"pdf_url","pushKey":"pdf_url"},{"receiveKey":"pdf_fileName","pushKey":"pdf_fileName"},{"receiveKey":"documents","pushKey":"documents"}]'
+WHERE id = 301;
+
+
+-- ============================================
+-- 最终版：模板505 + ds_config 505 + flow 407
+-- ============================================
+MERGE INTO template (id, name, category_id, content, type, tags, is_deleted, version) KEY(id) VALUES
+(505, '论文归档-打包推送file2Archives', 19,
+'// VFinal: u_lwdj column names, no c3, safe strings
+import groovy.json.JsonSlurper
+import java.security.MessageDigest
+import java.util.zip.ZipOutputStream
+import java.util.zip.ZipEntry
+import javax.xml.parsers.DocumentBuilderFactory
+import javax.xml.transform.TransformerFactory
+import javax.xml.transform.dom.DOMSource
+import javax.xml.transform.stream.StreamResult
+import javax.xml.transform.OutputKeys
+import java.net.HttpURLConnection
+import java.net.URL
+import java.text.SimpleDateFormat
+
+def API_BASE = params?.apiUrl ?: "http://localhost:8080/Archives"
+def CCODE = params?.ccode ?: "lwdj"
+def NOTT_API_KEY = params?.nottApiKey ?: "e3c5f52d-a905-43ac-a10c-4ea5255e368d"
+out.success = false
+
+def s = { val -> val?.toString() ?: "" }
+def s8 = { v -> def x = s(v); return (x.length() >= 8) ? x.substring(0, 8) : x }
+def s4 = { v -> def x = s(v); return (x.length() >= 4) ? x.substring(0, 4) : x }
+
+def fileId = s(input["uuid"]); if (!fileId) fileId = s(input["id"]); if (!fileId) fileId = s(input["标识"])
+if (!fileId) { out.error = "no fileId"; return }
+
+def pdfFiles = []
+def docRaw = input["documents"]
+if (docRaw) {
+    def docs = []
+    try { if (docRaw instanceof String) docs = new JsonSlurper().parseText(docRaw); else if (docRaw instanceof List) docs = docRaw } catch (Exception e) {}
+    for (def doc : docs) {
+        if (s(doc?.mimeType) == "application/pdf" && s(doc?.downloadUrl)) {
+            pdfFiles << [url: s(doc.downloadUrl), fileName: s(doc?.fileName), format: "pdf"]
+        }
+    }
+}
+if (pdfFiles.isEmpty()) {
+    def pu = s(input["pdf_url"])
+    if (pu) pdfFiles << [url: pu, fileName: s(input["pdf_fileName"]) ?: "thesis.pdf", format: "pdf"]
+}
+if (pdfFiles.isEmpty()) {
+    def lp = s(input["pdf_localPath"])
+    if (lp) pdfFiles << [path: lp, fileName: new File(lp).name, format: "pdf"]
+}
+if (pdfFiles.isEmpty()) { out.error = "no PDF"; return }
+
+def downloadFile = { urlStr, apiKey ->
+    def bytes = null
+    try { def c = new URL(urlStr).openConnection(); c.setConnectTimeout(10000); c.setReadTimeout(60000)
+        if (urlStr.contains("nottingham") && apiKey) c.setRequestProperty("Api-Key", apiKey)
+        if (c.getResponseCode() != 200) return null
+        def istream = c.getInputStream(); bytes = istream.bytes; istream.close()
+    } catch (Exception e) {}; return bytes
+}
+def readLocalFile = { path -> def f = new File(path); return f.exists() ? f.bytes : null }
+def computeMd5 = { byte[] d ->
+    if (!d) return ""
+    def md = MessageDigest.getInstance("MD5"); def dig = md.digest(d)
+    def sb = new StringBuilder(); for (byte b : dig) sb.append(String.format("%02x", b)); return sb.toString()
+}
+for (def pf : pdfFiles) {
+    if (pf.data != null) continue
+    pf.data = pf.path ? readLocalFile(pf.path) : downloadFile(pf.url, NOTT_API_KEY)
+    if (!pf.data) { out.error = "download fail"; return }
+    if (!pf.fileName) pf.fileName = "file.pdf"
+    pf.size = pf.data.length; pf.md5 = computeMd5(pf.data)
+}
+
+def degZh = s(input["培养层次"]); if (!degZh) degZh = s(input["degreeZh"])
+def prefix = degZh.contains("博士") ? "博士论文——" : (degZh.contains("硕士") || degZh.contains("研究生") ? "硕士论文——" : "")
+def ztmVal = s(input["ztm"]); if (!ztmVal) ztmVal = s(input["正题名"])
+if (!ztmVal) { def t = s(input["title"]); if (t) ztmVal = prefix + t }
+
+def sjVal = s8(input["sj"]); if (!sjVal) sjVal = s8(input["时间"])
+if (!sjVal) sjVal = s8(s(input["submissionDate"]).replaceAll("-",""))
+def yearStr = s4(sjVal); if (!yearStr) yearStr = new SimpleDateFormat("yyyy").format(new Date())
+def c2Val = s(input["c2"]); if (!c2Val) c2Val = s(input["二级目录"]); if (!c2Val) c2Val = "JX16"
+
+def dbf = DocumentBuilderFactory.newInstance(); def db = dbf.newDocumentBuilder()
+def doc = db.newDocument(); doc.setXmlStandalone(true)
+def root = doc.createElement("电子档案元数据"); doc.appendChild(root)
+def addEl = { p, n, v -> if (v != null && !v.toString().isEmpty()) { def e = doc.createElement(n); e.setTextContent(v.toString()); p.appendChild(e) } }
+
+addEl(root, "c1", "JX"); addEl(root, "c2", c2Val)
+addEl(root, "qzh", s(input["qzh"]) ?: "0289")
+addEl(root, "flh", s(input["flh"]) ?: (yearStr + "-" + c2Val))
+addEl(root, "ajh", s(input["ajh"])); addEl(root, "wjh", s(input["wjh"]))
+addEl(root, "mj", s(input["mj"]) ?: "内部"); addEl(root, "ztm", ztmVal)
+addEl(root, "zrz", s(input["zrz"]) ?: s(input["姓名"]) ?: s(input["author"]))
+addEl(root, "hzz", s(input["hzz"]))
+addEl(root, "sj", sjVal)
+addEl(root, "dw", s(input["dw"]) ?: s(input["学院"]) ?: s(input["orgUuid"]))
+addEl(root, "bgq", s(input["bgq"]) ?: "长期")
+addEl(root, "sl", s(input["sl"]) ?: String.valueOf(pdfFiles.size()))
+addEl(root, "zt", s(input["zt"]) ?: "电子文件")
+addEl(root, "ztc", s(input["ztc"]) ?: s(input["主题词"]) ?: s(input["keywords"]))
+addEl(root, "djsj", new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date()))
+addEl(root, "nd", yearStr)
+addEl(root, "gdfs", s(input["gdfs"])); addEl(root, "wh", s(input["wh"])); addEl(root, "tx", s(input["tx"]))
+addEl(root, "fdext1", s(input["姓名"]) ?: s(input["author"]))
+addEl(root, "fdext2", degZh)
+addEl(root, "fdext3", s(input["学号"]) ?: s(input["authorPersonId"]))
+addEl(root, "fdext4", s(input["导师姓名"]) ?: s(input["supervisor"]))
+addEl(root, "fdext5", s(input["专业"]) ?: s(input["subjectsZh"]))
+addEl(root, "fdext6", fileId)
+addEl(root, "fdext7", s(input["性别"]) ?: s(input["gender"]))
+addEl(root, "fdext8", s(input["入校日期"]) ?: s(input["enrollDate"]))
+addEl(root, "fdext9", s(input["国籍"]))
+
+for (int i = 0; i < pdfFiles.size(); i++) {
+    def pf = pdfFiles[i]; def dobj = doc.createElement("数字对象")
+    addEl(dobj, "数字对象标识", "文档" + (i + 1)); addEl(dobj, "格式信息", pf.format ?: "pdf")
+    addEl(dobj, "计算机文件名", pf.fileName ?: ""); addEl(dobj, "计算机文件大小", String.valueOf(pf.size ?: 0))
+    addEl(dobj, "数字摘要", pf.md5 ?: ""); root.appendChild(dobj)
+}
+
+def tf = TransformerFactory.newInstance(); def t = tf.newTransformer()
+t.setOutputProperty(OutputKeys.ENCODING, "UTF-8"); t.setOutputProperty(OutputKeys.INDENT, "yes")
+t.setOutputProperty("{http://xml.apache.org/xslt}indent-amount", "4")
+def sw = new StringWriter(); t.transform(new DOMSource(doc), new StreamResult(sw))
+def xmlStr = sw.toString()
+
+def tmpDir = File.createTempFile("a_", "_d"); tmpDir.delete(); tmpDir.mkdirs()
+new File(tmpDir, "元数据.xml").setText(xmlStr, "UTF-8")
+for (def pf : pdfFiles) new File(tmpDir, pf.fileName).bytes = pf.data
+
+def zipFile = File.createTempFile("a_", ".zip")
+def zos = new ZipOutputStream(new FileOutputStream(zipFile), java.nio.charset.StandardCharsets.UTF_8)
+def addToZip
+addToZip = { d, f, z, p ->
+    def en = p ? p + "/" + f.name : f.name
+    if (f.isDirectory()) { z.putNextEntry(new ZipEntry(en + "/")); z.closeEntry(); f.listFiles().each { addToZip(d, it, z, en) } }
+    else { z.putNextEntry(new ZipEntry(en)); def fi = new FileInputStream(f); def buf = new byte[8192]; int n; while ((n = fi.read(buf)) != -1) z.write(buf, 0, n); fi.close(); z.closeEntry() }
+}
+tmpDir.listFiles().each { addToZip(tmpDir, it, zos, null) }; zos.close()
+out.zipSize = zipFile.length()
+
+def CRLF = "\r\n"; def boundary = "----DC" + System.currentTimeMillis()
+def url = new URL(API_BASE + "/open_api/file2Archives")
+def conn = (HttpURLConnection) url.openConnection(); conn.setDoOutput(true); conn.setRequestMethod("POST")
+conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary)
+conn.setConnectTimeout(30000); conn.setReadTimeout(120000)
+def os = conn.getOutputStream(); def w = new OutputStreamWriter(os, "UTF-8")
+w.write("--" + boundary + CRLF); w.write("Content-Disposition: form-data; name=\"fileData\"; filename=\"" + zipFile.name + "\"" + CRLF)
+w.write("Content-Type: application/zip" + CRLF + CRLF); w.flush()
+def zb = zipFile.bytes; os.write(zb); os.flush(); w.write(CRLF)
+w.write("--" + boundary + CRLF); w.write("Content-Disposition: form-data; name=\"ccode\"" + CRLF + CRLF); w.write(CCODE + CRLF)
+w.write("--" + boundary + CRLF); w.write("Content-Disposition: form-data; name=\"fileIdentifierCode\"" + CRLF + CRLF); w.write(fileId + CRLF)
+w.write("--" + boundary + "--" + CRLF); w.flush(); w.close()
+
+def rc = conn.getResponseCode(); def rs = (rc == 200) ? conn.getInputStream() : conn.getErrorStream()
+def rt = rs.getText("UTF-8"); def rj = new JsonSlurper().parseText(rt)
+conn.disconnect(); zipFile.delete(); tmpDir.listFiles().each { it.delete() }; tmpDir.delete()
+
+out.httpStatus = rc; out.apiResponse = rj
+if (rc == 200) { out.success = true; out.message = "ok" }
+else { out.success = false; out.error = "HTTP " + rc }',
+'CUSTOM', '论文归档,file2Archives,元数据.xml,ZIP打包,MD5,全流程', 0, 1);
+
+MERGE INTO ds_config (id, name, description, source_type, api_method, api_url, api_timeout, api_mode, api_auth_type, template_id, enabled) KEY(id) VALUES
+(505, '论文归档-打包推送(file2Archives)', 'SCRIPT模式：下载PDF→生成元数据.xml(u_lwdj列名)→计算MD5→打包ZIP→推送档案系统/open_api/file2Archives', 'API', 'POST', '', 120, 'SCRIPT', 'NONE', 505, 1);
+
+MERGE INTO flow_config (id, name, description, input_ds_id, output_ds_id, sync_strategy, pipeline_config) KEY(id) VALUES
+(407, '诺丁汉论文-归档到档案系统(file2Archives)', '标准论文归档：诺丁汉API(401)→映射(301)→模板505打包推送', 401, 505, 'FULL', '[{"position":"AFTER_READ","name":"论文字段映射","steps":[{"type":"MAPPING","mappingTemplateId":301}]}]');
+
+-- DEBUG: minimal test template
+MERGE INTO template (id, name, category_id, content, type, tags, is_deleted, version) KEY(id) VALUES
+(505, 'TEST-minimal', 19, 'out.success = true; out.message = "hello world test 123"', 'CUSTOM', 'test', 0, 1);
+MERGE INTO template (id, name, category_id, content, type, tags, is_deleted, version) KEY(id) VALUES
+(505, 'TEST-step1', 19,
+'import groovy.json.JsonSlurper
+import javax.xml.parsers.DocumentBuilderFactory
+import javax.xml.transform.TransformerFactory
+import javax.xml.transform.dom.DOMSource
+import javax.xml.transform.stream.StreamResult
+import javax.xml.transform.OutputKeys
+import java.text.SimpleDateFormat
+
+def s = { val -> val?.toString() ?: "" }
+def s8 = { v -> def x = s(v); return (x.length() >= 8) ? x.substring(0, 8) : x }
+def s4 = { v -> def x = s(v); return (x.length() >= 4) ? x.substring(0, 4) : x }
+
+def fileId = s(input["uuid"]); if (!fileId) fileId = s(input["id"]); if (!fileId) fileId = s(input["标识"])
+if (!fileId) { out.error = "no fileId"; return }
+
+def degZh = s(input["培养层次"]); if (!degZh) degZh = s(input["degreeZh"])
+def ztmVal = s(input["ztm"]); if (!ztmVal) ztmVal = s(input["正题名"])
+if (!ztmVal) { def t = s(input["title"]); if (t) ztmVal = degZh + "——" + t }
+
+def sjVal = s8(input["sj"]); if (!sjVal) sjVal = s8(input["时间"])
+if (!sjVal) sjVal = s8(s(input["submissionDate"]).replaceAll("-",""))
+def yearStr = s4(sjVal); if (!yearStr) yearStr = new SimpleDateFormat("yyyy").format(new Date())
+
+def dbf = DocumentBuilderFactory.newInstance(); def db = dbf.newDocumentBuilder()
+def doc = db.newDocument(); doc.setXmlStandalone(true)
+def root = doc.createElement("电子档案元数据"); doc.appendChild(root)
+def addEl = { p, n, v -> if (v != null && !v.toString().isEmpty()) { def e = doc.createElement(n); e.setTextContent(v.toString()); p.appendChild(e) } }
+
+addEl(root, "c1", "JX"); addEl(root, "c2", "JX16"); addEl(root, "qzh", "0289")
+addEl(root, "ztm", ztmVal); addEl(root, "zrz", s(input["author"])); addEl(root, "sj", sjVal); addEl(root, "nd", yearStr)
+
+def tf = TransformerFactory.newInstance(); def t = tf.newTransformer()
+t.setOutputProperty(OutputKeys.ENCODING, "UTF-8"); t.setOutputProperty(OutputKeys.INDENT, "yes")
+def sw = new StringWriter(); t.transform(new DOMSource(doc), new StreamResult(sw))
+out.xml = sw.toString(); out.success = true; out.message = "xml ok"',
+'CUSTOM', 'test', 0, 1);
+MERGE INTO template (id, name, category_id, content, type, tags, is_deleted, version) KEY(id) VALUES
+(505, 'TEST-step2', 19,
+'import groovy.json.JsonSlurper
+import javax.xml.parsers.DocumentBuilderFactory
+import javax.xml.transform.TransformerFactory
+import javax.xml.transform.dom.DOMSource
+import javax.xml.transform.stream.StreamResult
+import javax.xml.transform.OutputKeys
+import java.net.HttpURLConnection
+import java.net.URL
+import java.text.SimpleDateFormat
+import java.util.zip.ZipOutputStream
+import java.util.zip.ZipEntry
+
+def API_BASE = params?.apiUrl ?: "http://localhost:8080/Archives"
+def CCODE = params?.ccode ?: "lwdj"
+
+def s = { val -> val?.toString() ?: "" }
+def s8 = { v -> def x = s(v); return (x.length() >= 8) ? x.substring(0, 8) : x }
+def s4 = { v -> def x = s(v); return (x.length() >= 4) ? x.substring(0, 4) : x }
+
+def fileId = s(input["uuid"]); if (!fileId) fileId = s(input["id"]); if (!fileId) fileId = s(input["标识"])
+if (!fileId) { out.error = "no fileId"; return }
+
+def degZh = s(input["培养层次"]); if (!degZh) degZh = s(input["degreeZh"])
+def ztmVal = s(input["ztm"]); if (!ztmVal) ztmVal = s(input["正题名"])
+if (!ztmVal) { def t = s(input["title"]); if (t) ztmVal = degZh + "——" + t }
+
+def sjVal = s8(input["sj"]); if (!sjVal) sjVal = s8(input["时间"])
+if (!sjVal) sjVal = s8(s(input["submissionDate"]).replaceAll("-",""))
+def yearStr = s4(sjVal); if (!yearStr) yearStr = new SimpleDateFormat("yyyy").format(new Date())
+
+def dbf = DocumentBuilderFactory.newInstance(); def db = dbf.newDocumentBuilder()
+def doc = db.newDocument(); doc.setXmlStandalone(true)
+def root = doc.createElement("电子档案元数据"); doc.appendChild(root)
+def addEl = { p, n, v -> if (v != null && !v.toString().isEmpty()) { def e = doc.createElement(n); e.setTextContent(v.toString()); p.appendChild(e) } }
+addEl(root, "c1", "JX"); addEl(root, "c2", "JX16"); addEl(root, "qzh", "0289")
+addEl(root, "ztm", ztmVal); addEl(root, "zrz", s(input["author"])); addEl(root, "sj", sjVal); addEl(root, "nd", yearStr)
+
+def tf = TransformerFactory.newInstance(); def t = tf.newTransformer()
+t.setOutputProperty(OutputKeys.ENCODING, "UTF-8"); t.setOutputProperty(OutputKeys.INDENT, "yes")
+def sw = new StringWriter(); t.transform(new DOMSource(doc), new StreamResult(sw))
+def xmlStr = sw.toString()
+
+def tmpDir = File.createTempFile("a_", "_d"); tmpDir.delete(); tmpDir.mkdirs()
+new File(tmpDir, "元数据.xml").setText(xmlStr, "UTF-8")
+new File(tmpDir, "dummy.pdf").setText("fake pdf", "UTF-8")
+
+def zipFile = File.createTempFile("a_", ".zip")
+def zos = new ZipOutputStream(new FileOutputStream(zipFile), java.nio.charset.StandardCharsets.UTF_8)
+def addToZip
+addToZip = { d, f, z, p ->
+    def en = p ? p + "/" + f.name : f.name
+    if (f.isDirectory()) { z.putNextEntry(new ZipEntry(en + "/")); z.closeEntry(); f.listFiles().each { addToZip(d, it, z, en) } }
+    else { z.putNextEntry(new ZipEntry(en)); def fi = new FileInputStream(f); def buf = new byte[8192]; int n; while ((n = fi.read(buf)) != -1) z.write(buf, 0, n); fi.close(); z.closeEntry() }
+}
+tmpDir.listFiles().each { addToZip(tmpDir, it, zos, null) }; zos.close()
+
+def CRLF = "\r\n"; def boundary = "----DC" + System.currentTimeMillis()
+def url = new URL(API_BASE + "/open_api/file2Archives")
+def conn = (HttpURLConnection) url.openConnection(); conn.setDoOutput(true); conn.setRequestMethod("POST")
+conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary)
+conn.setConnectTimeout(30000); conn.setReadTimeout(120000)
+def os = conn.getOutputStream(); def w = new OutputStreamWriter(os, "UTF-8")
+w.write("--" + boundary + CRLF); w.write("Content-Disposition: form-data; name=\"fileData\"; filename=\"" + zipFile.name + "\"" + CRLF)
+w.write("Content-Type: application/zip" + CRLF + CRLF); w.flush()
+def zb = zipFile.bytes; os.write(zb); os.flush(); w.write(CRLF)
+w.write("--" + boundary + CRLF); w.write("Content-Disposition: form-data; name=\"ccode\"" + CRLF + CRLF); w.write(CCODE + CRLF)
+w.write("--" + boundary + CRLF); w.write("Content-Disposition: form-data; name=\"fileIdentifierCode\"" + CRLF + CRLF); w.write(fileId + CRLF)
+w.write("--" + boundary + "--" + CRLF); w.flush(); w.close()
+
+def rc = conn.getResponseCode(); def rs = (rc == 200) ? conn.getInputStream() : conn.getErrorStream()
+def rt = rs.getText("UTF-8"); def rj = new JsonSlurper().parseText(rt)
+conn.disconnect(); zipFile.delete(); tmpDir.listFiles().each { it.delete() }; tmpDir.delete()
+
+out.httpStatus = rc; out.apiResponse = rj
+if (rc == 200) { out.success = true; out.message = "ok" }
+else { out.success = false; out.error = "HTTP " + rc }',
+'CUSTOM', 'test', 0, 1);
+MERGE INTO template (id, name, category_id, content, type, tags, is_deleted, version) KEY(id) VALUES
+(505, 'TEST-step2a', 19,
+'import groovy.json.JsonSlurper
+import javax.xml.parsers.DocumentBuilderFactory
+import javax.xml.transform.TransformerFactory
+import javax.xml.transform.dom.DOMSource
+import javax.xml.transform.stream.StreamResult
+import javax.xml.transform.OutputKeys
+import java.text.SimpleDateFormat
+import java.util.zip.ZipOutputStream
+import java.util.zip.ZipEntry
+
+def s = { val -> val?.toString() ?: "" }
+def s8 = { v -> def x = s(v); return (x.length() >= 8) ? x.substring(0, 8) : x }
+def s4 = { v -> def x = s(v); return (x.length() >= 4) ? x.substring(0, 4) : x }
+
+def fileId = s(input["uuid"]); if (!fileId) fileId = s(input["id"]); if (!fileId) fileId = s(input["标识"])
+if (!fileId) { out.error = "no fileId"; return }
+
+def degZh = s(input["培养层次"]); if (!degZh) degZh = s(input["degreeZh"])
+def ztmVal = s(input["ztm"]); if (!ztmVal) ztmVal = s(input["正题名"])
+if (!ztmVal) { def t = s(input["title"]); if (t) ztmVal = degZh + "——" + t }
+
+def sjVal = s8(input["sj"]); if (!sjVal) sjVal = s8(input["时间"])
+if (!sjVal) sjVal = s8(s(input["submissionDate"]).replaceAll("-",""))
+def yearStr = s4(sjVal); if (!yearStr) yearStr = new SimpleDateFormat("yyyy").format(new Date())
+
+def dbf = DocumentBuilderFactory.newInstance(); def db = dbf.newDocumentBuilder()
+def doc = db.newDocument(); doc.setXmlStandalone(true)
+def root = doc.createElement("电子档案元数据"); doc.appendChild(root)
+def addEl = { p, n, v -> if (v != null && !v.toString().isEmpty()) { def e = doc.createElement(n); e.setTextContent(v.toString()); p.appendChild(e) } }
+addEl(root, "c1", "JX"); addEl(root, "c2", "JX16"); addEl(root, "qzh", "0289")
+addEl(root, "ztm", ztmVal); addEl(root, "zrz", s(input["author"])); addEl(root, "sj", sjVal); addEl(root, "nd", yearStr)
+
+def tf = TransformerFactory.newInstance(); def t = tf.newTransformer()
+t.setOutputProperty(OutputKeys.ENCODING, "UTF-8"); t.setOutputProperty(OutputKeys.INDENT, "yes")
+def sw = new StringWriter(); t.transform(new DOMSource(doc), new StreamResult(sw))
+def xmlStr = sw.toString()
+
+def tmpDir = File.createTempFile("a_", "_d"); tmpDir.delete(); tmpDir.mkdirs()
+new File(tmpDir, "元数据.xml").setText(xmlStr, "UTF-8")
+new File(tmpDir, "dummy.pdf").setText("test", "UTF-8")
+
+def zipFile = File.createTempFile("a_", ".zip")
+def zos = new ZipOutputStream(new FileOutputStream(zipFile), java.nio.charset.StandardCharsets.UTF_8)
+def addToZip
+addToZip = { d, f, z, p ->
+    def en = p ? p + "/" + f.name : f.name
+    if (f.isDirectory()) { z.putNextEntry(new ZipEntry(en + "/")); z.closeEntry(); f.listFiles().each { addToZip(d, it, z, en) } }
+    else { z.putNextEntry(new ZipEntry(en)); def fi = new FileInputStream(f); def buf = new byte[8192]; int n; while ((n = fi.read(buf)) != -1) z.write(buf, 0, n); fi.close(); z.closeEntry() }
+}
+tmpDir.listFiles().each { addToZip(tmpDir, it, zos, null) }; zos.close()
+
+out.zipSize = zipFile.length()
+zipFile.delete(); tmpDir.listFiles().each { it.delete() }; tmpDir.delete()
+out.success = true; out.message = "zip ok"',
+'CUSTOM', 'test', 0, 1);
+MERGE INTO template (id, name, category_id, content, type, tags, is_deleted, version) KEY(id) VALUES
+(505, 'TEST-step2b', 19,
+'import groovy.json.JsonSlurper
+import javax.xml.parsers.DocumentBuilderFactory
+import javax.xml.transform.TransformerFactory
+import javax.xml.transform.dom.DOMSource
+import javax.xml.transform.stream.StreamResult
+import javax.xml.transform.OutputKeys
+import java.text.SimpleDateFormat
+
+def s = { val -> val?.toString() ?: "" }
+def s8 = { v -> def x = s(v); return (x.length() >= 8) ? x.substring(0, 8) : x }
+def s4 = { v -> def x = s(v); return (x.length() >= 4) ? x.substring(0, 4) : x }
+
+def fileId = s(input["uuid"]); if (!fileId) fileId = s(input["id"]); if (!fileId) fileId = s(input["标识"])
+if (!fileId) { out.error = "no fileId"; return }
+
+def degZh = s(input["培养层次"]); if (!degZh) degZh = s(input["degreeZh"])
+def ztmVal = s(input["ztm"]); if (!ztmVal) ztmVal = s(input["正题名"])
+if (!ztmVal) { def t = s(input["title"]); if (t) ztmVal = degZh + "——" + t }
+
+def sjVal = s8(input["sj"]); if (!sjVal) sjVal = s8(input["时间"])
+if (!sjVal) sjVal = s8(s(input["submissionDate"]).replaceAll("-",""))
+def yearStr = s4(sjVal); if (!yearStr) yearStr = new SimpleDateFormat("yyyy").format(new Date())
+
+def dbf = DocumentBuilderFactory.newInstance(); def db = dbf.newDocumentBuilder()
+def doc = db.newDocument(); doc.setXmlStandalone(true)
+def root = doc.createElement("电子档案元数据"); doc.appendChild(root)
+def addEl = { p, n, v -> if (v != null && !v.toString().isEmpty()) { def e = doc.createElement(n); e.setTextContent(v.toString()); p.appendChild(e) } }
+addEl(root, "c1", "JX"); addEl(root, "c2", "JX16"); addEl(root, "qzh", "0289")
+addEl(root, "ztm", ztmVal); addEl(root, "zrz", s(input["author"])); addEl(root, "sj", sjVal); addEl(root, "nd", yearStr)
+
+def tf = TransformerFactory.newInstance(); def t = tf.newTransformer()
+t.setOutputProperty(OutputKeys.ENCODING, "UTF-8"); t.setOutputProperty(OutputKeys.INDENT, "yes")
+def sw = new StringWriter(); t.transform(new DOMSource(doc), new StreamResult(sw))
+def xmlStr = sw.toString()
+
+def tmpDir = File.createTempFile("a_", "_d"); tmpDir.delete(); tmpDir.mkdirs()
+new File(tmpDir, "元数据.xml").setText(xmlStr, "UTF-8")
+new File(tmpDir, "dummy.pdf").setText("test", "UTF-8")
+
+tmpDir.listFiles().each { it.delete() }; tmpDir.delete()
+out.success = true; out.message = "files ok"',
+'CUSTOM', 'test', 0, 1);
+MERGE INTO template (id, name, category_id, content, type, tags, is_deleted, version) KEY(id) VALUES
+(505, 'TEST-step2c', 19,
+'def tmpDir = File.createTempFile("a_", "_d"); tmpDir.delete(); tmpDir.mkdirs()
+new File(tmpDir, "test.txt").setText("hello", "UTF-8")
+tmpDir.listFiles().each { it.delete() }; tmpDir.delete()
+out.success = true; out.message = "file ops ok"',
+'CUSTOM', 'test', 0, 1);
+MERGE INTO template (id, name, category_id, content, type, tags, is_deleted, version) KEY(id) VALUES
+(505, 'TEST-step2d', 19,
+'def tmpDir = File.createTempFile("a_", "_d"); tmpDir.delete(); tmpDir.mkdirs()
+new File(tmpDir, "metadata.xml").setText("hello", "UTF-8")
+new File(tmpDir, "dummy.pdf").setText("test", "UTF-8")
+tmpDir.listFiles().each { it.delete() }; tmpDir.delete()
+out.success = true; out.message = "ascii files ok"',
+'CUSTOM', 'test', 0, 1);
+MERGE INTO template (id, name, category_id, content, type, tags, is_deleted, version) KEY(id) VALUES
+(505, 'TEST-trace', 19,
+'import java.io.PrintWriter
+try {
+    out.message = "step1 ok"
+    def tmpDir = File.createTempFile("a_", "_d")
+    out.message = "step2 createTempFile=" + tmpDir.absolutePath
+    tmpDir.delete()
+    out.message = "step3 deleted"
+    tmpDir.mkdirs()
+    out.message = "step4 mkdirs"
+    new File(tmpDir, "metadata.xml").setText("hello", "UTF-8")
+    out.message = "step5 setText"
+    new File(tmpDir, "dummy.pdf").setText("test", "UTF-8")
+    out.message = "step6 setText2"
+    tmpDir.listFiles().each { it.delete() }
+    out.message = "step7 cleaned"
+    tmpDir.delete()
+    out.success = true; out.message = "all ok"
+} catch (Exception e) {
+    def sw2 = new StringWriter(); def pw = new PrintWriter(sw2); e.printStackTrace(pw); pw.close()
+    out.success = false; out.error = sw2.toString()
+}',
+'CUSTOM', 'test', 0, 1);
+
+-- Final: ARCHIVE mode ds_config + flow 407 using Java ThesisArchiveService
+MERGE INTO ds_config (id, name, description, source_type, api_method, api_url, api_timeout, api_mode, api_auth_type, api_auth_config, api_body, enabled) KEY(id) VALUES
+(601, '档案系统-论文归档(file2Archives)', 'ARCHIVE模式(Java)：生成元数据.xml(u_lwdj列名,无c3) + 打包PDF + 推送到档案系统/open_api/file2Archives', 'API', 'POST', 'https://docmgt.nottingham.edu.cn/Archives/open_api/file2Archives', 120, 'ARCHIVE', 'NONE', '{"ccode":"PhD","fileIdentifierField":"标识","appkey":"sysadmin","password":"UNNCunnc1"}', '[{"tag":"一级目录","source":"一级目录","default":"{year}"},{"tag":"二级目录","source":"二级目录","default":"JX16"},{"tag":"三级目录","source":"三级目录","default":""},{"tag":"全宗号","source":"全宗号","default":"0289"},{"tag":"实体分类号","source":"实体分类号","default":"{year}-{c2}"},{"tag":"案卷号","source":"案卷号","default":""},{"tag":"文件号","source":"文件号","default":""},{"tag":"密级","source":"密级","default":"内部"},{"tag":"正题名","source":"正题名","default":"宁波诺丁汉大学{姓名}({学号}){学位}及评审材料 ({title})"},{"tag":"信息分类号","source":"信息分类号","default":"{authorPersonId}"},{"tag":"合作者","source":"合作者","default":"{supervisor}"},{"tag":"档案馆室代号","source":"","default":""},{"tag":"主题词","source":"主题词","default":"{orgUuid}"},{"tag":"时间","source":"时间","default":"{timeVal}"},{"tag":"第一责任者","source":"第一责任者","default":"{姓名}"},{"tag":"责任者","source":"","default":"宁波诺丁汉大学"},{"tag":"单位","source":"单位","default":"{学院}"},{"tag":"归档份数","source":"归档份数","default":"1"},{"tag":"保管期限","source":"保管期限","default":"长期"},{"tag":"载体","source":"载体","default":"电子文件"},{"tag":"文本","source":"文本","default":"正本"},{"tag":"获奖等级","source":"","default":""},{"tag":"获奖时间","source":"","default":""},{"tag":"归档时间","source":"","default":"{now}"},{"tag":"存址","source":"存址","default":"{学位}"},{"tag":"学籍变更","source":"学籍变更","default":""},{"tag":"输入员","source":"输入员","default":"论文系统"},{"tag":"标识","source":"","default":"论文系统"}]', 1);
+
+MERGE INTO flow_config (id, name, description, input_ds_id, output_ds_id, sync_strategy, pipeline_config) KEY(id) VALUES
+(407, '诺丁汉论文-归档到档案系统(file2Archives)', 'Java ARCHIVE模式：诺丁汉API→映射→ThesisArchiveService生成XML+ZIP+推送', 401, 601, 'FULL', '[{"position":"AFTER_READ","name":"论文字段映射","steps":[{"type":"MAPPING","mappingTemplateId":301}]}]');
+
+-- 修复：映射模板和列配置改用中文标签（匹配元数据.xml）
+-- 源字段 → 中文XML标签名
+
+UPDATE mapping_template SET mappings =
+ '[{"receiveKey":"author","pushKey":"姓名"},{"receiveKey":"authorPersonId","pushKey":"学号"},{"receiveKey":"supervisor","pushKey":"导师姓名"},{"receiveKey":"subjectsZh","pushKey":"专业"},{"receiveKey":"orgUuid","pushKey":"学院"},{"receiveKey":"submissionDate","pushKey":"时间"},{"receiveKey":"keywords","pushKey":"主题词"},{"receiveKey":"author","pushKey":"第一责任者"},{"receiveKey":"orgUuid","pushKey":"归档单位"},{"receiveKey":"submissionDate","pushKey":"离校日期"},{"receiveKey":"degreeZh","pushKey":"培养层次"},{"receiveKey":"uuid","pushKey":"标识"},{"receiveKey":"title","pushKey":"title"},{"receiveKey":"pdf_count","pushKey":"pdf_count"},{"receiveKey":"pdf_url","pushKey":"pdf_url"},{"receiveKey":"pdf_fileName","pushKey":"pdf_fileName"},{"receiveKey":"documents","pushKey":"documents"}]'
+WHERE id = 301;
+
+UPDATE column_config SET columns_json =
+ '[{"key":"一级目录","value":"一级目录(年份)"},{"key":"二级目录","value":"二级目录(研究生教育JX16)"},{"key":"三级目录","value":"三级目录(可空)"},{"key":"全宗号","value":"全宗号(0289)"},{"key":"实体分类号","value":"实体分类号(年度-二级目录)"},{"key":"案卷号","value":"案卷号(流水号)"},{"key":"文件号","value":"文件号(可空)"},{"key":"密级","value":"密级(内部)"},{"key":"正题名","value":"正题名(学位前缀+标题)"},{"key":"姓名","value":"学生姓名"},{"key":"学号","value":"学号"},{"key":"导师姓名","value":"导师姓名"},{"key":"专业","value":"专业"},{"key":"学院","value":"学院"},{"key":"页数","value":"PDF页数"},{"key":"时间","value":"毕业时间(YYYYMMDD)"},{"key":"主题词","value":"主题词"},{"key":"第一责任者","value":"第一责任者"},{"key":"归档单位","value":"归档单位"},{"key":"归档份数","value":"归档份数"},{"key":"存址","value":"存址"},{"key":"保管期限","value":"保管期限(长期)"},{"key":"载体","value":"载体(电子文件)"},{"key":"文本","value":"文本(正本)"},{"key":"国籍","value":"国籍(中国)"},{"key":"性别","value":"性别"},{"key":"入校日期","value":"入校日期(YYYYMMDD)"},{"key":"离校日期","value":"离校日期(YYYYMMDD)"},{"key":"培养类型","value":"培养类型(普通全日制)"},{"key":"培养层次","value":"培养层次"},{"key":"学籍变更","value":"学籍变更"},{"key":"来源","value":"来源(论文系统)"},{"key":"标识","value":"唯一标识(fileIdentifierCode)"}]'
+WHERE id = 301;
+
+-- ============================================
+-- 新API网关: api.nottingham.edu.cn (Cookie认证)
+-- 模板402: 诺丁汉学生论文数据源-V2
+-- ds_config 602: 新网关论文数据源
+-- flow_config 408: 新网关论文→归档
+-- ============================================
+
+-- 模板: 新API网关 学生论文数据源 (Cookie认证 + Person API增强)
+MERGE INTO template (id, name, category_id, content, type, tags, is_deleted, version) KEY(id) VALUES
+(402, '诺丁汉学生论文数据源-V2(新网关)', 23,
+'// ============================================
+// 宁波诺丁汉大学 学生论文接口 (新API网关 v2)
+// api.nottingham.edu.cn/unnc/ris/v1/
+//
+// 认证: login → identitytoken → Cookie header
+// 增强: Person API → 学号, supervisorOrganizations → 学院UUID
+// ============================================
+
+import groovy.json.JsonOutput
+
+def LOGIN_URL = params?.loginUrl ?: "https://api.nottingham.edu.cn/unnc/rest/core/auth/login"
+def LOGIN_USER = params?.loginUser ?: "efile"
+def LOGIN_PASS = params?.loginPass ?: "ynYZVCeB74LQJ9@k"
+def API_BASE = params?.apiBaseUrl ?: "https://api.nottingham.edu.cn/unnc/ris/v1"
+def PAGE_SIZE = Math.min((params?.pageSize ?: 10) as int, 1000)
+def MAX_RECORDS = (params?.maxRecords ?: 0) as int
+
+// Step 1: Login
+def loginUrl = "${LOGIN_URL}?userName=${LOGIN_USER}&password=${LOGIN_PASS}".toString()
+    def loginResp = http.post(loginUrl, "", [:])
+def token = loginResp.data?.identitytoken ?: ""
+if (!token) {
+    out.error = "Login failed: " + loginResp
+    return
+}
+out.downloadToken = token
+
+def headers = ["Cookie": "identitytoken=" + token, "Accept": "application/json"]
+def tokenLastRefresh = System.currentTimeMillis()
+
+// token 刷新闭包（每 5 分钟自动重新登录，防止执行时间过长导致过期）
+def refreshHeaders = {
+    long now = System.currentTimeMillis()
+    if (now - tokenLastRefresh > 300_000) {
+        try {
+            def freshLoginUrl = "${LOGIN_URL}?userName=${LOGIN_USER}&password=${LOGIN_PASS}".toString()
+            def freshResp = http.post(freshLoginUrl, "", [:])
+            def newToken = freshResp.data?.identitytoken
+            if (newToken) {
+                headers["Cookie"] = "identitytoken=" + newToken
+                tokenLastRefresh = now
+            }
+        } catch (Exception e) { }
+    }
+}
+
+// Step 2: 分页拉取全量论文
+def allItems = []
+def offset = 0
+while (true) {
+    def pageUrl = "${API_BASE}/student-theses?size=${PAGE_SIZE}&offset=${offset}".toString()
+    def pageResp = http.get(pageUrl, headers)
+    if (!pageResp.success || pageResp.status != 200) {
+        out.error = "Thesis API failed at offset=" + offset + ": HTTP " + pageResp.status
+        return
+    }
+    def pageItems = pageResp.data?.items ?: []
+    def totalCount = pageResp.data?.count ?: 0
+    allItems.addAll(pageItems)
+    if (MAX_RECORDS > 0 && allItems.size() >= MAX_RECORDS) break
+    if (pageItems.size() < PAGE_SIZE || allItems.size() >= totalCount) break
+    offset += PAGE_SIZE
+}
+if (MAX_RECORDS > 0 && allItems.size() > MAX_RECORDS) {
+    allItems = allItems.take(MAX_RECORDS)
+}
+
+// Step 3: 展平 + Person API 增强
+def items = allItems.collect { item ->
+    def primaryId = item.identifiers?.find { it.typeDiscriminator == "PrimaryId" }
+    def firstContributor = item.contributors?.getAt(0)
+    def firstSupervisor = item.supervisors?.getAt(0)
+    def firstOrg = item.organizations?.getAt(0)
+
+    // ---- Person API: 获取学号(affiliationId) ----
+    refreshHeaders()
+    def personApiFailed = false
+    def personStudentId = ""
+    def enrollmentEndDate = ""
+    def studentAssocs = null
+    def personApiUuid = firstContributor?.person?.uuid
+    if (personApiUuid) {
+        try {
+            def personUrl = "${API_BASE}/persons/${personApiUuid}".toString()
+            def personResp = http.get(personUrl, headers)
+            if (personResp.success && personResp.status == 200) {
+                studentAssocs = personResp.data?.studentOrganizationAssociations
+                if (studentAssocs) {
+                    def assocWithId = studentAssocs.find { it.affiliationId }
+                    if (assocWithId) personStudentId = assocWithId.affiliationId
+                    if (studentAssocs[0]?.period?.endDate) {
+                        enrollmentEndDate = studentAssocs[0].period.endDate
+                    }
+                }
+            }
+            personApiFailed = personApiUuid && !personStudentId
+        } catch (Exception e) { personApiFailed = true }
+    }
+
+    // 学院: supervisorOrganizations + organizations 全部UUID → 新API查中文名
+    def orgApiFailed = false
+    def allOrgUuids = [] as Set
+        // 从 Person API 取 primary 的 organization UUID，没有 primary 则全取
+    if (studentAssocs) {
+        def primaryAssocs = studentAssocs.findAll { it.primaryAssociation }
+        def orgAssocs = primaryAssocs ?: studentAssocs
+        orgAssocs.each { if (it.organization?.uuid) allOrgUuids.add(it.organization.uuid) }
+    }
+    def collegeNames = []
+    allOrgUuids.each { orgUuid ->
+        try {
+            def orgUrl = "${API_BASE}/organizations/${orgUuid}".toString()
+            def orgResp = http.get(orgUrl, headers)
+            if (orgResp.success && orgResp.status == 200) {
+                def name = orgResp.data?.name?.get("zh_CN") ?: orgResp.data?.name?.get("en_GB") ?: ""
+                if (name) collegeNames.add(name)
+            }
+        } catch (Exception e) { }
+    }
+    def collegeName = collegeNames.join(", ")
+    orgApiFailed = !collegeName
+    // ---- 作者信息 ----
+    def allContributorNames = item.contributors?.collect { c ->
+        "${c?.name?.firstName ?: ""} ${c?.name?.lastName ?: ""}".trim()
+    }?.findAll { it } ?: []
+    def authorFirst = firstContributor?.name?.firstName ?: ""
+    def authorLast = firstContributor?.name?.lastName ?: ""
+    def authorPersonId = personStudentId ?: firstContributor?.person?.uuid ?: firstContributor?.externalPerson?.uuid ?: ""
+    def allAuthors = allContributorNames.join("; ")
+
+    // ---- 导师信息 ----
+    def supervisorFirst = firstSupervisor?.name?.firstName ?: ""
+    def supervisorLast = firstSupervisor?.name?.lastName ?: ""
+    def supervisorPersonId = firstSupervisor?.person?.uuid ?: firstSupervisor?.externalPerson?.uuid ?: ""
+    def allSupervisors = item.supervisors?.collect { s ->
+        "${s?.name?.firstName ?: ""} ${s?.name?.lastName ?: ""}".trim()
+    }?.findAll { it }?.join(", ") ?: ""
+    def supervisorOrgUuids = item.supervisorOrganizations?.collect { it.uuid }?.findAll { it }?.join(",") ?: ""
+
+    // ---- 授予机构 ----
+    def awardingInstitution = item.awardingInstitutions?.getAt(0)?.externalOrganizationRef?.uuid ?: ""
+
+    // ---- 关键词 ----
+    def freeKwGroup = item.keywordGroups?.find { it.typeDiscriminator == "FreeKeywordsKeywordGroup" && it.logicalName == "keywordContainers" }
+    def kwList = freeKwGroup?.keywords?.find { it.locale == "en_GB" }?.freeKeywords
+    def keywords = kwList ? kwList.join(", ") : ""
+
+    // ---- 学科分类 ----
+    def classGroup = item.keywordGroups?.find { it.typeDiscriminator == "ClassificationsKeywordGroup" && it.logicalName == "librarySubjects" }
+    def subjectTerms = classGroup?.classifications?.collect { it.term }
+    def subjects = subjectTerms?.collect { it."en_GB" }?.findAll { it }?.join(", ") ?: ""
+    def subjectsZh = subjectTerms?.collect { it."zh_CN" }?.findAll { it }?.join(", ") ?: ""
+
+    // ---- 摘要 ----
+    def abstractEn = item.abstract?.get("en_GB") ?: ""
+    def abstractCn = item.abstract?.get("zh_CN") ?: ""
+
+    // ---- 学位/类型 ----
+    def degreeEn = item.type?.term?.get("en_GB") ?: ""
+    def degreeZh = item.type?.term?.get("zh_CN") ?: ""
+    def language = item.language?.term?.get("en_GB") ?: ""
+
+    // ---- 可见性 & 工作流 ----
+    def visibility = item.visibility?.key ?: ""
+    def status = item.workflow?.step ?: ""
+
+    // ---- 文档: 构建新网关下载URL ----
+    def documents = item.documents?.collect { doc ->
+        if (doc.fileId && item.uuid) {
+            doc.downloadUrl = "${API_BASE}/student-theses/${item.uuid}/files/${doc.fileId}".toString()
+        }
+        return doc
+    }
+    def pdfDocs = documents?.findAll { it.fileId && !(it.fileName?.contains("changehistory")) } ?: []
+    def docEmbargoDate = pdfDocs.getAt(0)?.embargoDate ?: ""
+    def docVisibility = pdfDocs.getAt(0)?.visibility?.key ?: ""
+
+    // ---- 日期 (新API返回 {year, month, day} 对象，需转换) ----
+    def date = item.awardDate
+    if (date instanceof Map) {
+        def y = date.get("year"); def m = date.get("month"); def d = date.get("day")
+        def mm = m != null ? String.format("%02d", m as int) : "01"
+        def dd = d != null ? String.format("%02d", d as int) : "01"
+        date = "${y ?: ""}${mm}${dd}".toString()
+    } else if (date != null) {
+        date = date.toString().replaceAll("-", "")
+    } else {
+        date = ""
+    }
+
+    // ---- 标识符 ----
+    def allIdentifiers = item.identifiers ? JsonOutput.toJson(item.identifiers) : ""
+    def prettyUrls = item.prettyUrlIdentifiers?.join(", ") ?: ""
+
+    // ====== 扁平字段 ======
+    item.id = primaryId?.value ?: item.uuid ?: ""
+    item.pureId = item.pureId ?: ""
+    item.uuid = item.uuid ?: ""
+    item.title = item.title?.value ?: ""
+    item.portalUrl = item.portalUrl ?: ""
+    item.version = item.version ?: ""
+    item.createdBy = item.createdBy ?: ""
+    item.createdDate = item.createdDate ?: ""
+    item.modifiedBy = item.modifiedBy ?: ""
+    item.modifiedDate = item.modifiedDate ?: ""
+    item.prettyUrlIdentifiers = prettyUrls
+
+    item.author = "${authorFirst} ${authorLast}".trim()
+    item.authorFirst = authorFirst
+    item.authorLast = authorLast
+    item.authorPersonId = authorPersonId
+    item.allAuthors = allAuthors
+
+    item.supervisor = allSupervisors
+    item.supervisors = allSupervisors
+    item.supervisorPersonId = supervisorPersonId
+    item.supervisorOrgUuids = supervisorOrgUuids
+
+    item.orgUuid = collegeName ?: firstOrg?.uuid ?: ""
+    item.managingOrgUuid = item.managingOrganization?.uuid ?: ""
+    item.allIdentifiers = allIdentifiers
+    item.awardingInstitution = awardingInstitution
+
+    item.degreeEn = degreeEn
+    item.degreeZh = degreeZh
+    item.language = language
+
+    item.subjects = subjects
+    item.subjectsZh = subjectsZh
+    item.keywords = keywords
+
+    item.abstract_cn = abstractCn
+    item.abstract_en = abstractEn
+
+    item.pdf_count = pdfDocs.size()
+    item.documents = documents
+    item.docEmbargoDate = docEmbargoDate
+    item.docVisibility = docVisibility
+    item.pdf_url = pdfDocs.getAt(0)?.downloadUrl ?: ""
+    item.pdf_fileName = pdfDocs.getAt(0)?.fileName ?: ""
+
+    // 时间使用 person API 的 enrollmentEndDate, 回退 awardDate
+    def endDateVal = enrollmentEndDate ? enrollmentEndDate.replaceAll("-", "") : date
+    item.submissionDate = endDateVal
+    item.publicationDate = date
+    item.visibility = visibility
+    item.status = status
+
+    item._enrichmentFailed = personApiFailed || orgApiFailed
+    // 下载用 token
+    item._downloadToken = token
+
+    return item
+}
+
+    // 工作流过滤: 默认只处理 forApproval 状态的论文
+    def filterWorkflow = params?.filterWorkflow ?: "approved"
+    def beforeFilter = items.size()
+    items = items.findAll { it.workflow?.step == filterWorkflow }
+    // 年份过滤: 基于enrollmentEndDate(已转为submissionDate), 首次全量处理到2025年
+    def filterYearMax = (params?.filterYearMax ?: "0") as int
+    if (filterYearMax == 0) {
+        def hasSynced = params?.syncedIds && !params.syncedIds.isEmpty()
+        filterYearMax = hasSynced ? (java.time.LocalDate.now().year - 1) : 2025
+    }
+    def filterYearMin = filterYearMax > 2025 ? filterYearMax : 0
+    items = items.findAll {
+        def sd = it.submissionDate
+        sd != null && !sd.isEmpty() && sd.length() >= 4 && 
+            (sd.substring(0,4) as int) >= filterYearMin && (sd.substring(0,4) as int) <= filterYearMax
+    }
+    // 过滤掉数据增强失败的条目(学号/学院未获取到)
+    beforeFilter = items.size()
+    def enrichedItems = items.findAll { !it._enrichmentFailed }
+    def skippedCount = beforeFilter - enrichedItems.size()
+    items = enrichedItems
+    if (skippedCount > 0) {
+        out.filterLog = "数据增强过滤: 跳过 ${skippedCount}/${beforeFilter} 条(学号/学院未获取到)"
+    }
+    // SYNCED_SET 过滤: 跳过已同步的 UUID
+    if (params?.strategy == "SYNCED_SET" && params?.syncedIds) {
+        def syncedIdsStr = params.syncedIds
+        def syncedSet = [] as Set
+        // 解析 [uuid1, uuid2, ...] 格式
+        if (syncedIdsStr.startsWith("[")) {
+            syncedIdsStr = syncedIdsStr.substring(1, syncedIdsStr.length() - 1)
+            syncedIdsStr.split(",").each { s ->
+                def trimmed = s.trim()
+                if (trimmed) syncedSet.add(trimmed)
+            }
+        }
+        if (!syncedSet.isEmpty()) {
+            def before = items.size()
+            items = items.findAll { !syncedSet.contains(it.get("uuid")) }
+            def skipped = before - items.size()
+            if (skipped > 0) { }
+        }
+    }
+    // 增量过滤: 只保留 submissionDate >= 上次水位线的论文
+    def watermark = params?.watermark_lastValue
+    def incCol = params?.watermark_column
+    if (watermark && !watermark.isEmpty() && incCol == "submissionDate") {
+        def filtered = items.findAll { it ->
+            def d = it.get("submissionDate")
+            d != null && d.toString() >= watermark
+        }
+        if (!filtered.isEmpty()) { items = filtered }
+    }
+    out.data = items
+    out.success = true
+    out.count = items.size()
+',
+'CUSTOM', '宁波诺丁汉,论文数据,API输出,新网关,Cookie认证', 0, 1);
+
+-- 数据源: 新网关论文输入 (SCRIPT模式)
+MERGE INTO ds_config (id, name, description, source_type, api_method, api_url, api_timeout, api_mode, api_auth_type, template_id, enabled) KEY(id) VALUES
+(602, '学生论文数据源-V2(新网关)', '新API网关(api.nottingham.edu.cn): login→Cookie认证, Person API获取学号, supervisorOrganizations获取学院。支持params: loginUrl/loginUser/loginPass/apiBaseUrl/pageSize/maxRecords', 'API', 'GET', '', 30, 'SCRIPT', 'NONE', 402, 1);
+
+-- 流程: 新网关论文→归档
+MERGE INTO flow_config (id, name, description, input_ds_id, output_ds_id, sync_strategy, incremental_column, incremental_column_type, pipeline_config) KEY(id) VALUES
+(408, '新网关论文-归档到档案系统(file2Archives)', '新API网关: 论文数据源(602)→字段映射(301)→ThesisArchiveService生成XML+ZIP+推送档案系统(601)', 602, 601, 'SYNCED_SET', 'uuid', 'STRING', '[{"position":"AFTER_READ","name":"论文字段映射","steps":[{"type":"MAPPING","mappingTemplateId":301}]}]');
+
+-- ============================================
+-- 定时任务配置
+-- ============================================
+MERGE INTO task_config (id, name, flow_config_id, cron_expr, status, retry_times, retry_interval, timeout) KEY(id) VALUES
+(701, '论文归档年度定时(流程408)', 408, '0 0 0 30 8 ?', 'STOPPED', 0, 0, 0);

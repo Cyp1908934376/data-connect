@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>${title}</title>
     <link rel="stylesheet" href="/static/css/bootstrap.min.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="/static/css/bootstrap-icons.css">
     <link rel="stylesheet" href="/static/css/app.css">
     <#list extraCss as css>
         <link rel="stylesheet" href="${css}">
@@ -85,6 +85,9 @@
             <div class="ms-auto d-flex align-items-center gap-2">
                 <a href="/doc.html" target="_blank" class="btn btn-sm btn-outline-info" title="API 接口文档">
                     <i class="bi bi-file-earmark-text"></i>
+                </a>
+                <a href="/docs/project-guide" target="_blank" class="btn btn-sm btn-outline-success" title="项目运维手册">
+                    <i class="bi bi-book"></i>
                 </a>
                 <button class="btn btn-sm btn-outline-warning" onclick="restartApp()" title="重启应用">
                     <i class="bi bi-arrow-clockwise"></i> 重启

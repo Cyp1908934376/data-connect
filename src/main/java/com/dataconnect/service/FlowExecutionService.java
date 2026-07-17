@@ -51,10 +51,25 @@ public class FlowExecutionService {
     @Autowired
     private ExecutionLogFileService executionLogFileService;
 
+    @Autowired
+    private ThesisArchiveService thesisArchiveService;
+
+    // ==================== 执行控制 ====================
+    private volatile boolean executionCancelled = false;
+    private volatile boolean executionPaused = false;
+    private final Object pauseLock = new Object();
+    private volatile String executionStatus = "idle"; // idle|running|paused|cancelled|completed|failed
+    private volatile Long currentFlowConfigId = null;
+    private volatile int currentRow = 0;
+    private volatile int totalRows = 0;
+
+    // 遇到错误是否立即停止（默认 true）
+    private volatile boolean stopOnError = true;
+
     private final List<Map<String, Object>> executionLogs = new CopyOnWriteArrayList<>();
 
     private enum SyncStrategy {
-        FULL, INCREMENTAL_TIME, INCREMENTAL_ID;
+        FULL, INCREMENTAL_TIME, INCREMENTAL_ID, SYNCED_SET;
 
         static SyncStrategy from(String s) {
             try { return valueOf(s); }
@@ -62,10 +77,21 @@ public class FlowExecutionService {
         }
     }
 
+    // SYNCED_SET: 本次执行成功同步的 UUID 集合，执行结束后持久化
+    private final Set<String> syncedIds = new LinkedHashSet<>();
+
     public Map<String, Object> execute(Long flowConfigId) {
         executionLogs.clear();
         Map<String, Object> result = new LinkedHashMap<>();
         long startTime = System.currentTimeMillis();
+
+        // 初始化执行控制状态
+        executionCancelled = false;
+        executionPaused = false;
+        executionStatus = "running";
+        currentFlowConfigId = flowConfigId;
+        currentRow = 0;
+        totalRows = 0;
 
         FlowConfig flowConfig = flowConfigRepository.findById(flowConfigId).orElse(null);
         if (flowConfig == null) {
@@ -82,9 +108,17 @@ public class FlowExecutionService {
         try {
             addLog("INFO", "开始执行对接流程: " + flowConfig.getName() + " [策略: " + strategy + "]");
 
-            // Load watermark for incremental strategies
+            // Load watermark / synced IDs for non-FULL strategies
             Map<String, Object> watermarkBefore = null;
-            if (strategy != SyncStrategy.FULL) {
+            syncedIds.clear();
+            if (strategy == SyncStrategy.SYNCED_SET) {
+                Set<String> loaded = executionLogFileService.loadSyncedIds(flowConfigId);
+                syncedIds.addAll(loaded);
+                addLog("INFO", "加载已同步ID集合, count=" + syncedIds.size());
+                // 构造 watermark 用于传入 extraParams
+                watermarkBefore = new LinkedHashMap<>();
+                watermarkBefore.put("syncedIds", new ArrayList<>(syncedIds));
+            } else if (strategy != SyncStrategy.FULL) {
                 watermarkBefore = executionLogFileService.loadWatermark(flowConfigId);
                 if (watermarkBefore != null) {
                     addLog("INFO", "加载水位线: " + flowConfig.getIncrementalColumn()
@@ -107,6 +141,12 @@ public class FlowExecutionService {
             addLog("INFO", "读取到 " + inputData.size() + " 条数据");
             if (inputData.size() >= 1000 && strategy != SyncStrategy.FULL) {
                 addLog("WARN", "增量读取达到1000条上限，可能存在未同步数据");
+            }
+            totalRows = inputData.size();
+
+            // 检查是否被取消
+            if (executionCancelled) {
+                throw new RuntimeException("执行已被用户取消");
             }
 
             List<Map<String, Object>> processedData = inputData;
@@ -131,6 +171,9 @@ public class FlowExecutionService {
             }
 
             // Step 5: 写入输出数据源 (with upsert for incremental)
+            if (executionCancelled) {
+                throw new RuntimeException("执行已被用户取消");
+            }
             addLog("INFO", "步骤5: 写入输出数据源...");
             int writeCount = writeOutputData(flowConfig, processedData, strategy);
             addLog("INFO", "成功写入 " + writeCount + " 条数据");
@@ -157,6 +200,12 @@ public class FlowExecutionService {
                 }
             }
 
+            // SYNCED_SET: 保存本次成功同步的 UUID
+            if (strategy == SyncStrategy.SYNCED_SET && !syncedIds.isEmpty()) {
+                executionLogFileService.saveSyncedIds(flowConfigId, syncedIds);
+                addLog("INFO", "已同步ID已保存, 本次新增=" + writeCount + ", 累计=" + syncedIds.size());
+            }
+
             // AFTER_WRITE 阶段：写入后执行（通知、级联同步等）
             for (PipelineStage stage : pipeline) {
                 if ("AFTER_WRITE".equals(stage.getPosition())) {
@@ -178,6 +227,7 @@ public class FlowExecutionService {
                     inputData.size(), processedData.size(), writeCount,
                     watermarkBefore, watermarkAfter, "SUCCESS", null);
 
+            executionStatus = "completed";
             result.put("success", true);
             result.put("totalCount", inputData.size());
             result.put("successCount", processedData.size());
@@ -187,11 +237,18 @@ public class FlowExecutionService {
             result.put("logs", getExecutionLogs());
         } catch (Exception e) {
             log.error("Flow execution failed", e);
+            boolean isCancelled = "执行已被用户取消".equals(e.getMessage())
+                    || (e.getCause() != null && "执行已被用户取消".equals(e.getCause().getMessage()));
+            executionStatus = isCancelled ? "cancelled" : "failed";
             writeExecutionLogToFile(flowConfigId, flowConfig, strategy, startTime,
-                    0, 0, 0, null, null, "FAILED", e.getMessage());
+                    0, 0, 0, null, null,
+                    isCancelled ? "CANCELLED" : "FAILED", e.getMessage());
             result.put("success", false);
             result.put("error", e.getMessage());
+            result.put("cancelled", isCancelled);
             result.put("logs", getExecutionLogs());
+        } finally {
+            currentFlowConfigId = null;
         }
 
         return result;
@@ -324,7 +381,11 @@ public class FlowExecutionService {
         try {
             // Build watermark params for API request
             Map<String, String> extraParams = null;
-            if (strategy != SyncStrategy.FULL && watermark != null && watermark.get("lastValue") != null) {
+            if (strategy == SyncStrategy.SYNCED_SET) {
+                extraParams = new HashMap<>();
+                extraParams.put("strategy", "SYNCED_SET");
+                extraParams.put("syncedIds", new ArrayList<>(syncedIds).toString());
+            } else if (strategy != SyncStrategy.FULL && watermark != null && watermark.get("lastValue") != null) {
                 extraParams = new HashMap<>();
                 extraParams.put("watermark_lastValue", String.valueOf(watermark.get("lastValue")));
                 extraParams.put("watermark_column", String.valueOf(watermark.get("incrementalColumn")));
@@ -511,12 +572,17 @@ public class FlowExecutionService {
                         }
                     }
 
-                    result.put(pushKey, value);
+                    // 跳过 null 值，避免推送 "null" 字符串
+                    if (value != null) {
+                        result.put(pushKey, value);
+                    }
                 }
             }
-            // 保留未在映射中的字段
+            // 保留未在映射中的字段（跳过 null 值）
             for (Map.Entry<String, Object> entry : row.entrySet()) {
-                result.putIfAbsent(entry.getKey(), entry.getValue());
+                if (entry.getValue() != null) {
+                    result.putIfAbsent(entry.getKey(), entry.getValue());
+                }
             }
         } catch (Exception e) {
             addLog("ERROR", "解析映射关系失败: " + e.getMessage());
@@ -709,11 +775,15 @@ public class FlowExecutionService {
             List<Map<String, Object>> result = new ArrayList<>();
             int failCount = 0;
             for (int i = 0; i < data.size(); i++) {
+                checkPauseAndCancel();
+                if (executionCancelled) throw new RuntimeException("执行已被用户取消");
+                currentRow = i + 1;
                 try {
                     result.add(applyTemplate(template, data.get(i), effectiveParams));
                 } catch (Exception e) {
                     failCount++;
                     addLog("ERROR", "模板[" + template.getName() + "]处理第" + (i + 1) + "条失败: " + e.getMessage());
+                    if (stopOnError) throw new RuntimeException("模板处理第" + (i + 1) + "条失败: " + e.getMessage(), e);
                 }
             }
             addLog("INFO", "模板[" + template.getName() + "]完成: 成功=" + result.size() + ", 失败=" + failCount);
@@ -730,17 +800,55 @@ public class FlowExecutionService {
                 addLog("WARN", "映射模板不存在或未定义映射关系: " + step.getMappingTemplateId());
                 return data;
             }
+            addLog("INFO", "使用映射模板: [" + mapping.getId() + "] " + mapping.getName());
+            // 打印涉及 fdext 的映射关系
+            try {
+                List<Map<String, String>> dbgMappings = objectMapper.readValue(mapping.getMappings(),
+                        new TypeReference<List<Map<String, String>>>() {});
+                for (Map<String, String> m : dbgMappings) {
+                    String pk = m.get("pushKey");
+                    if (pk != null && pk.startsWith("fdext")) {
+                        addLog("INFO", "  映射: " + m.get("receiveKey") + " → " + pk);
+                    }
+                }
+            } catch (Exception ignored) {}
+            // 打印第一条数据的可用字段
+            if (!data.isEmpty()) {
+                addLog("INFO", "源数据字段: " + data.get(0).keySet());
+            }
             List<Map<String, Object>> result = new ArrayList<>();
             int failCount = 0;
             for (int i = 0; i < data.size(); i++) {
+                checkPauseAndCancel();
+                if (executionCancelled) throw new RuntimeException("执行已被用户取消");
+                currentRow = i + 1;
                 try {
                     result.add(applyMapping(mapping, data.get(i)));
                 } catch (Exception e) {
                     failCount++;
                     addLog("ERROR", "映射[" + mapping.getName() + "]处理第" + (i + 1) + "条失败: " + e.getMessage());
+                    if (stopOnError) throw new RuntimeException("映射处理第" + (i + 1) + "条失败: " + e.getMessage(), e);
                 }
             }
             addLog("INFO", "映射[" + mapping.getName() + "]完成: 成功=" + result.size() + ", 失败=" + failCount);
+            // 打印第一条映射结果的 fdext 字段
+            if (!result.isEmpty()) {
+                Map<String, Object> firstRow = result.get(0);
+                StringBuilder fdextInfo = new StringBuilder("第一条映射结果中的fdext字段: ");
+                boolean hasFdext = false;
+                for (String key : firstRow.keySet()) {
+                    if (key.startsWith("fdext")) {
+                        hasFdext = true;
+                        fdextInfo.append(key).append("='").append(firstRow.get(key)).append("' ");
+                    }
+                }
+                if (hasFdext) {
+                    addLog("INFO", fdextInfo.toString());
+                } else {
+                    addLog("WARN", "第一条映射结果中没有任何 fdext 字段！");
+                    addLog("INFO", "第一条映射结果的字段: " + firstRow.keySet());
+                }
+            }
             return result;
         }
 
@@ -791,7 +899,10 @@ public class FlowExecutionService {
 
             int rowNum = 0;
             for (Map<String, Object> row : data) {
+                checkPauseAndCancel();
+                if (executionCancelled) throw new RuntimeException("执行已被用户取消");
                 rowNum++;
+                currentRow = rowNum;
                 if (row.isEmpty()) continue;
                 try {
                     if (strategy == SyncStrategy.FULL) {
@@ -806,6 +917,7 @@ public class FlowExecutionService {
                 } catch (Exception e) {
                     addLog("ERROR", "[" + rowNum + "/" + data.size() + "] 写入行失败: " + e.getMessage());
                     log.warn("写入行失败, table={}", tableName, e);
+                    if (stopOnError) throw new RuntimeException("第" + rowNum + "条写入DB失败: " + e.getMessage(), e);
                 }
             }
         } catch (Exception e) {
@@ -1035,14 +1147,26 @@ public class FlowExecutionService {
     }
 
     private int writeToApi(DsConfig dsConfig, List<Map<String, Object>> data) {
+        if ("ARCHIVE".equalsIgnoreCase(dsConfig.getApiMode())) {
+            return writeToArchive(dsConfig, data);
+        }
         int count = 0;
         int rowNum = 0;
         for (Map<String, Object> row : data) {
+            checkPauseAndCancel();
+            if (executionCancelled) throw new RuntimeException("执行已被用户取消");
             rowNum++;
+            currentRow = rowNum;
             try {
                 Map<String, String> params = new HashMap<>();
                 for (Map.Entry<String, Object> entry : row.entrySet()) {
-                    params.put(entry.getKey(), String.valueOf(entry.getValue()));
+                    Object val = entry.getValue();
+                    if (val == null) continue;
+                    if (val instanceof List || val instanceof Map) {
+                        params.put(entry.getKey(), objectMapper.writeValueAsString(val));
+                    } else {
+                        params.put(entry.getKey(), String.valueOf(val));
+                    }
                 }
                 addLog("INFO", "[" + rowNum + "/" + data.size() + "] 推送数据行, 字段: " + params.keySet());
                 String resp = apiClientService.executeRequest(dsConfig, params);
@@ -1053,9 +1177,68 @@ public class FlowExecutionService {
                 count++;
             } catch (Exception e) {
                 addLog("ERROR", "[" + rowNum + "/" + data.size() + "] 写入接口失败: " + e.getMessage());
+                if (stopOnError) throw new RuntimeException("第" + rowNum + "条写入失败: " + e.getMessage(), e);
             }
         }
         return count;
+    }
+
+    /**
+     * 论文归档模式：逐条调用 ThesisArchiveService 生成XML+打包+推送。
+     */
+    private int writeToArchive(DsConfig dsConfig, List<Map<String, Object>> data) {
+        int count = 0;
+        int rowNum = 0;
+        // 按实体分类号分别计数，每个分类号从1开始
+        Map<String, Integer> entityCaseCounters = new LinkedHashMap<>();
+        for (Map<String, Object> row : data) {
+            checkPauseAndCancel();
+            if (executionCancelled) throw new RuntimeException("执行已被用户取消");
+            rowNum++;
+            currentRow = rowNum;
+            try {
+                String entityClassNum = computeEntityClassNum(row);
+                int caseNum = entityCaseCounters.getOrDefault(entityClassNum, 0) + 1;
+                entityCaseCounters.put(entityClassNum, caseNum);
+                row.put("案卷号", String.valueOf(caseNum));
+                Object fid = row.get("标识");
+                Object enrichFailed = row.get("_enrichmentFailed");
+                if (enrichFailed != null && !"false".equals(String.valueOf(enrichFailed))) {
+                    addLog("WARN", "[" + rowNum + "/" + data.size() + "] 数据增强失败(学号/学院未获取到), _enrichmentFailed=" + enrichFailed + ", 跳过归档, 标识: " + fid);
+                    continue;
+                }
+                addLog("INFO", "[" + rowNum + "/" + data.size() + "] 论文归档, 标识: " + fid);
+                Map<String, Object> result = thesisArchiveService.execute(row, dsConfig);
+                if (Boolean.TRUE.equals(result.get("success"))) {
+                    addLog("INFO", "[" + rowNum + "/" + data.size() + "] 归档推送成功");
+                    if (fid != null) syncedIds.add(fid.toString());
+                } else {
+                    addLog("WARN", "[" + rowNum + "/" + data.size() + "] 归档推送失败: " + result.getOrDefault("error", "未知"));
+                }
+                count++;
+            } catch (Exception e) {
+                addLog("ERROR", "[" + rowNum + "/" + data.size() + "] 归档异常: " + e.getMessage());
+                if (stopOnError) throw new RuntimeException("第" + rowNum + "条归档失败: " + e.getMessage(), e);
+            }
+        }
+        return count;
+    }
+
+    /**
+     * 根据行数据计算实体分类号（年份-二级目录），与 ThesisArchiveService 逻辑一致。
+     */
+    private String computeEntityClassNum(Map<String, Object> row) {
+        String c2Val = strVal(row, "二级目录", "JX16");
+        String timeVal = strVal(row, "时间", "");
+        if (timeVal.isEmpty()) timeVal = strVal(row, "submissionDate", "").replaceAll("-", "");
+        String year = timeVal.length() >= 4 ? timeVal.substring(0, 4)
+                : String.valueOf(java.time.LocalDate.now().getYear());
+        return year + "-" + c2Val;
+    }
+
+    private String strVal(Map<String, Object> row, String key, String def) {
+        Object v = row.get(key);
+        return v != null ? v.toString() : def;
     }
 
     private void addLog(String level, String message) {
@@ -1073,6 +1256,71 @@ public class FlowExecutionService {
             result.add(line);
         }
         return result;
+    }
+
+    // ==================== 执行控制方法 ====================
+
+    /**
+     * 在行循环中检查暂停/取消状态。
+     * 暂停时阻塞等待，取消时直接返回（由调用方检查 executionCancelled 标志）。
+     */
+    private void checkPauseAndCancel() {
+        while (executionPaused && !executionCancelled) {
+            synchronized (pauseLock) {
+                try {
+                    executionStatus = "paused";
+                    pauseLock.wait(1000); // 每秒醒来检查一次
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
+    }
+
+    /** 取消当前执行 */
+    public void cancel() {
+        executionCancelled = true;
+        executionPaused = false;
+        executionStatus = "cancelled";
+        synchronized (pauseLock) {
+            pauseLock.notifyAll();
+        }
+    }
+
+    /** 暂停当前执行 */
+    public void pause() {
+        executionPaused = true;
+        addLog("WARN", "执行已暂停，等待恢复...");
+    }
+
+    /** 恢复当前执行 */
+    public void resume() {
+        executionPaused = false;
+        executionStatus = "running";
+        synchronized (pauseLock) {
+            pauseLock.notifyAll();
+        }
+        addLog("INFO", "执行已恢复");
+    }
+
+    /** 获取当前执行状态 */
+    public Map<String, Object> getExecutionStatus() {
+        Map<String, Object> status = new LinkedHashMap<>();
+        status.put("status", executionStatus);
+        status.put("flowConfigId", currentFlowConfigId);
+        status.put("currentRow", currentRow);
+        status.put("totalRows", totalRows);
+        status.put("logs", getExecutionLogs());
+        return status;
+    }
+
+    public void setStopOnError(boolean stopOnError) {
+        this.stopOnError = stopOnError;
+    }
+
+    public boolean isStopOnError() {
+        return stopOnError;
     }
 
     /**

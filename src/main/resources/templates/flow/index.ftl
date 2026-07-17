@@ -31,6 +31,8 @@
                                 <span class="badge bg-info">按时间增量</span>
                             <#elseif strat == 'INCREMENTAL_ID'>
                                 <span class="badge bg-info">按ID增量</span>
+                            <#elseif strat == 'SYNCED_SET'>
+                                <span class="badge bg-success">已同步去重</span>
                             <#else>
                                 <span class="badge bg-secondary">全量</span>
                             </#if>
@@ -109,31 +111,147 @@
     </div>
 </div>
 
+<!-- 执行控制弹窗 -->
+<div class="modal fade" id="execControlModal" data-bs-backdrop="static" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-gear"></i> 执行控制</h5>
+                <span class="badge bg-info ms-2" id="execStatus">running</span>
+            </div>
+            <div class="modal-body">
+                <div class="mb-2">
+                    <div class="progress" style="height: 24px;">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated" id="execProgressBar"
+                             role="progressbar" style="width:0%"></div>
+                    </div>
+                </div>
+                <div class="small text-muted mb-3">
+                    当前行: <span id="execCurrentRow">0</span> / <span id="execTotalRows">...</span>
+                </div>
+                <div class="card bg-light mb-3" style="max-height:160px;overflow-y:auto;">
+                    <div class="card-body p-2" id="execLogConsole"></div>
+                </div>
+                <div class="d-flex justify-content-between">
+                    <button type="button" class="btn btn-warning" id="btnExecPause">
+                        <i class="bi bi-pause-circle"></i> 暂停
+                    </button>
+                    <button type="button" class="btn btn-danger" id="btnExecCancel">
+                        <i class="bi bi-stop-circle"></i> 取消执行
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
+// ==================== 执行控制弹窗 ====================
+var execPollTimer = null;
+var execAjax = null;
+
 $('.btn-execute-flow').on('click', function() {
     var $btn = $(this);
     var flowId = $btn.data('flow-id');
     if (!confirm('确定执行此流程？')) return;
 
-    var loading = showLoading('正在执行数据对接...', '数据量较大时可能需要较长时间，请耐心等待');
     $btn.prop('disabled', true).html('<i class="bi bi-hourglass-split"></i> 执行中...');
 
+    // 显示执行控制弹窗
+    $('#execStatus').text('running');
+    $('#execProgressBar').css('width', '0%').text('');
+    $('#execCurrentRow').text('0');
+    $('#execTotalRows').text('...');
+    $('#execLogConsole').empty();
+    $('#btnExecPause').prop('disabled', false).html('<i class="bi bi-pause-circle"></i> 暂停');
+    var execModal = new bootstrap.Modal('#execControlModal');
+    execModal.show();
+
+    // 轮询执行状态
+    var pollStart = Date.now();
+    execPollTimer = setInterval(function() {
+        $.get('/flow/api/status', function(res) {
+            if (res.code === 0 && res.data) {
+                var s = res.data;
+                $('#execStatus').text(s.status || 'running');
+                if (s.totalRows > 0) {
+                    var pct = Math.round(s.currentRow / s.totalRows * 100);
+                    $('#execProgressBar').css('width', pct + '%').text(s.currentRow + '/' + s.totalRows);
+                }
+                $('#execCurrentRow').text(s.currentRow || 0);
+                $('#execTotalRows').text(s.totalRows || '...');
+                // 更新日志
+                if (s.logs && s.logs.length > 0) {
+                    var latest = s.logs.slice(-5);
+                    var html = '';
+                    latest.forEach(function(line) {
+                        var cls = line.indexOf('[ERROR]') > -1 ? 'text-danger' : (line.indexOf('[WARN]') > -1 ? 'text-warning' : '');
+                        html += '<div class="' + cls + ' small">' + escHtmlS(line) + '</div>';
+                    });
+                    $('#execLogConsole').html(html);
+                }
+                // 更新暂停按钮
+                if (s.status === 'paused') {
+                    $('#btnExecPause').html('<i class="bi bi-play-circle"></i> 继续').off('click').on('click', function() {
+                        $.post('/flow/api/resume');
+                    });
+                }
+                if (s.status === 'completed' || s.status === 'failed' || s.status === 'cancelled') {
+                    clearInterval(execPollTimer);
+                    execModal.hide();
+                    $btn.prop('disabled', false).html('<i class="bi bi-play-fill"></i> 执行');
+                }
+            }
+        });
+    }, 1500);
+
+    // 发送执行请求（阻塞等待）
     $.post('/flow/api/execute', { flowConfigId: flowId }, function(res) {
-        loading.close();
+        clearInterval(execPollTimer);
+        execModal.hide();
         if (res.code === 0) {
             var d = res.data;
             showSuccess('总数: ' + (d.totalCount || 0) + ', 成功: ' + (d.successCount || 0) + ', 失败: ' + (d.failCount || 0) + ', 耗时: ' + (d.duration || 0) + 'ms', { title: '执行完成', duration: 6000 });
         } else {
-            showError(res.message || '未知错误', { title: '执行失败' });
+            if (res.data && res.data.cancelled) {
+                showWarning('执行已被取消', { title: '已取消' });
+            } else {
+                showError(res.message || '未知错误', { title: '执行失败', duration: 8000 });
+            }
         }
     }).fail(function(xhr) {
-        loading.close();
+        clearInterval(execPollTimer);
+        execModal.hide();
         var msg = '请求失败';
         try { var err = JSON.parse(xhr.responseText); msg = err.message || msg; } catch(e) {}
         showError(msg, { title: '执行异常' });
     }).always(function() {
         $btn.prop('disabled', false).html('<i class="bi bi-play-fill"></i> 执行');
     });
+});
+
+// 取消按钮
+$('#btnExecCancel').on('click', function() {
+    if (!confirm('确定取消当前执行？')) return;
+    $(this).prop('disabled', true).text('取消中...');
+    $.post('/flow/api/cancel');
+});
+
+// 暂停/继续按钮
+$('#btnExecPause').on('click', function() {
+    var status = $('#execStatus').text();
+    if (status === 'paused') {
+        $.post('/flow/api/resume');
+        $(this).html('<i class="bi bi-pause-circle"></i> 暂停');
+    } else {
+        $.post('/flow/api/pause');
+        $(this).html('<i class="bi bi-play-circle"></i> 继续');
+    }
+});
+
+// 弹窗关闭时取消轮询
+$('#execControlModal').on('hidden.bs.modal', function() {
+    if (execPollTimer) clearInterval(execPollTimer);
 });
 
 // ---- 同步日志查看 ----

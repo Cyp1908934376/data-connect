@@ -125,6 +125,35 @@ public class FlowController {
         return ApiResponse.error((String) result.getOrDefault("error", "执行失败"));
     }
 
+    // ==================== 执行控制 ====================
+
+    @PostMapping("/api/pause")
+    @ResponseBody
+    public ApiResponse<String> pause() {
+        flowExecutionService.pause();
+        return ApiResponse.success("已发送暂停信号");
+    }
+
+    @PostMapping("/api/resume")
+    @ResponseBody
+    public ApiResponse<String> resume() {
+        flowExecutionService.resume();
+        return ApiResponse.success("已恢复执行");
+    }
+
+    @PostMapping("/api/cancel")
+    @ResponseBody
+    public ApiResponse<String> cancel() {
+        flowExecutionService.cancel();
+        return ApiResponse.success("已发送取消信号");
+    }
+
+    @GetMapping("/api/status")
+    @ResponseBody
+    public ApiResponse<Map<String, Object>> status() {
+        return ApiResponse.success(flowExecutionService.getExecutionStatus());
+    }
+
     @GetMapping("/api/logs")
     @ResponseBody
     public ApiResponse<java.util.List<String>> getLogs() {

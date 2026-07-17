@@ -126,6 +126,12 @@
                                 <strong><i class="bi bi-hash"></i> 按ID增量</strong><br>
                                 <small class="text-muted">基于自增ID字段，仅同步大于上次最大ID的数据</small>
                             </label>
+                            <input type="radio" class="btn-check" name="syncStrategyRadio" id="strategySyncedSet"
+                                   value="SYNCED_SET" autocomplete="off">
+                            <label class="btn btn-outline-primary" for="strategySyncedSet">
+                                <strong><i class="bi bi-check2-circle"></i> 已同步去重</strong><br>
+                                <small class="text-muted">记录已同步的UUID，后续跳过已推送的数据</small>
+                            </label>
                         </div>
                     </div>
 
@@ -505,7 +511,7 @@ function syncIncrementalConfig() {
 
 $('input[name=syncStrategyRadio]').on('change', function() {
     var strategy = $(this).val();
-    $('#incrementalConfig').toggle(strategy !== 'FULL');
+    $('#incrementalConfig').toggle(strategy !== 'FULL' && strategy !== 'SYNCED_SET');
     $('#syncStrategy').val(strategy);
 });
 
@@ -644,7 +650,9 @@ $(function() {
         var radio = $('input[name=syncStrategyRadio][value=' + savedStrategy + ']');
         if (radio.length) {
             radio.prop('checked', true);
-            $('#incrementalConfig').show();
+            if (savedStrategy !== 'SYNCED_SET') {
+                $('#incrementalConfig').show();
+            }
         }
     }
     $('#syncStrategy').val(savedStrategy);

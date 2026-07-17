@@ -66,7 +66,7 @@
                             <#if columnConfigs??>
                                 <#list columnConfigs as cc>
                                     <#if ((cc.columnType)!'RECEIVE') == 'PUSH'>
-                                    <option value="${cc.id}" <#if (template.pushColumnConfigId!0) == cc.id>selected</#if>>${cc.name}</option>
+                                    <option value="${cc.id}" <#if template.pushColumnConfigId?? && template.pushColumnConfigId == cc.id>selected</#if>>${cc.name}</option>
                                     </#if>
                                 </#list>
                             </#if>
@@ -214,11 +214,11 @@ function addMappingRowInternal(idx, receiveKey, receiveValue, type, pushKey, pus
             pushOptions += '<option value="' + (c.key || '') + '" data-value="' + (c.value || '') + '"' + sel + '>' + (c.key || '') + ' (' + (c.value || '') + ')</option>';
         });
         pushOptions += '</optgroup>';
-    }
-    if (receiveCols.length > 0) {
-        pushOptions += '<optgroup label="接收列配置">';
+    } else if (receiveCols.length > 0) {
+        // 仅在未选择推送列配置时，回退使用接收列配置作为推送列选项
+        pushOptions += '<optgroup label="接收列配置(回退)">';
         receiveCols.forEach(function(c) {
-            var sel = (pushKey === c.key && pushCols.length === 0) ? ' selected' : '';
+            var sel = (pushKey === c.key) ? ' selected' : '';
             pushOptions += '<option value="' + (c.key || '') + '" data-value="' + (c.value || '') + '"' + sel + '>' + (c.key || '') + ' (' + (c.value || '') + ')</option>';
         });
         pushOptions += '</optgroup>';
@@ -259,9 +259,9 @@ function onPushColumnConfigChange() {
             pushOptions += '<option value="' + (c.key || '') + '" data-value="' + (c.value || '') + '">' + (c.key || '') + ' (' + (c.value || '') + ')</option>';
         });
         pushOptions += '</optgroup>';
-    }
-    if (receiveCols.length > 0) {
-        pushOptions += '<optgroup label="接收列配置">';
+    } else if (receiveCols.length > 0) {
+        // 仅在未选择推送列配置时，回退使用接收列配置作为推送列选项
+        pushOptions += '<optgroup label="接收列配置(回退)">';
         receiveCols.forEach(function(c) {
             pushOptions += '<option value="' + (c.key || '') + '" data-value="' + (c.value || '') + '">' + (c.key || '') + ' (' + (c.value || '') + ')</option>';
         });
@@ -274,7 +274,16 @@ function onPushColumnConfigChange() {
         // Only update if the push key is a select, not custom input
         if ($row.find('.push-key').is('select')) {
             $row.find('.push-key').html(pushOptions);
-            if (currentPushKey) $row.find('.push-key').val(currentPushKey);
+            if (currentPushKey) {
+                $row.find('.push-key').val(currentPushKey);
+                // 如果当前值在新选项中不存在，转为自定义文本输入以保留值
+                if ($row.find('.push-key').val() !== currentPushKey) {
+                    $row.find('.push-key').replaceWith(
+                        '<input type="text" class="form-control form-control-sm push-key" value="'
+                        + currentPushKey + '" placeholder="自定义推送键">'
+                    );
+                }
+            }
         }
     });
 }
@@ -441,16 +450,10 @@ function saveTemplate() {
 // Init: load existing mappings on page load
 $(function() {
     // Try to populate mapping rows from existing data
-    var selectedOpt = $('#columnConfigId option:selected');
-    var columnsJson = selectedOpt.data('columns');
-    if (columnsJson) {
-        try {
-            var cols = typeof columnsJson === 'string' ? JSON.parse(columnsJson) : columnsJson;
-            renderMappingRows(cols);
-        } catch(e) {}
-    }
-    // If there are existing mappings but no column config selected, render them directly
-    if (existingMappings.length > 0 && $('#mappingTableBody tr.mapping-row').length === 0) {
+    var configId = $('#columnConfigId').val();
+    if (configId && allColumnConfigData[configId]) {
+        renderMappingRows(allColumnConfigData[configId]);
+    } else if (existingMappings.length > 0) {
         existingMappings.forEach(function(m, idx) {
             addMappingRowInternal(idx + 1, m.receiveKey, m.receiveValue || '', 'string', m.pushKey, m.pushValue, m.templateId, m.templateName);
         });

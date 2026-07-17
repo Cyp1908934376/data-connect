@@ -352,3 +352,68 @@ function restartApp() {
         showError('重启请求失败');
     });
 }
+
+// ==================== data.sql 同步操作 ====================
+
+// 从 data.sql 重新加载到数据库
+$(document).on('click', '.btn-sync-reload', function() {
+    if (!confirm('确认从 data.sql 重新加载配置到数据库？\n这将覆盖当前数据库中的配置数据。')) return;
+    var $btn = $(this).prop('disabled', true);
+    var loading = showLoading('正在从 data.sql 加载...', '执行 SQL 语句中');
+    $.ajax({
+        url: '/api/reload-data-sql',
+        type: 'POST'
+    }).done(function(res) {
+        if (res.code === 0) {
+            showSuccess(res.data || '加载成功');
+            setTimeout(function() { location.reload(); }, 1500);
+        } else {
+            showError(res.message || '加载失败', { title: '加载失败' });
+        }
+    }).fail(function(xhr) {
+        var msg = '请求失败';
+        try { var err = JSON.parse(xhr.responseText); msg = err.message || msg; } catch(e) {}
+        showError(msg);
+    }).always(function() {
+        hideLoading();
+        $btn.prop('disabled', false);
+    });
+});
+
+// 导出数据库配置到 data.sql
+$(document).on('click', '.btn-sync-export', function() {
+    if (!confirm('确认将当前数据库配置导出到 data.sql？\n这将覆盖 data.sql 文件的现有内容。')) return;
+    var $btn = $(this).prop('disabled', true);
+    var loading = showLoading('正在导出配置...', '生成 data.sql 中');
+    $.ajax({
+        url: '/api/export-data-sql',
+        type: 'POST'
+    }).done(function(res) {
+        if (res.code === 0 && res.data) {
+            if (res.data.mode === 'download' && res.data.content) {
+                // JAR 模式：触发浏览器下载
+                var blob = new Blob([res.data.content], {type: 'application/sql;charset=UTF-8'});
+                var url = URL.createObjectURL(blob);
+                var a = document.createElement('a');
+                a.href = url;
+                a.download = 'data.sql';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                showSuccess(res.data.message || '已下载 data.sql');
+            } else {
+                showSuccess(res.data.message || '导出成功');
+            }
+        } else {
+            showError(res.message || '导出失败', { title: '导出失败' });
+        }
+    }).fail(function(xhr) {
+        var msg = '请求失败';
+        try { var err = JSON.parse(xhr.responseText); msg = err.message || msg; } catch(e) {}
+        showError(msg);
+    }).always(function() {
+        hideLoading();
+        $btn.prop('disabled', false);
+    });
+});
