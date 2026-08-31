@@ -6,6 +6,7 @@ import com.dataconnect.entity.TaskExecutionLog;
 import com.dataconnect.service.FlowConfigService;
 import com.dataconnect.service.FlowExecutionService;
 import com.dataconnect.service.TaskScheduleService;
+import com.dataconnect.service.VisualTemplateService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,6 +31,9 @@ public class TaskController {
     @Autowired
     private FlowExecutionService flowExecutionService;
 
+    @Autowired
+    private VisualTemplateService visualTemplateService;
+
     @GetMapping("/list")
     public String list(Model model) {
         log.info("访问任务列表页");
@@ -48,6 +52,10 @@ public class TaskController {
         model.addAttribute("pageTitle", id != null ? "编辑任务" : "新增任务");
         model.addAttribute("task", task);
         model.addAttribute("flows", flowConfigService.listAll());
+        if (task.isVisual() && task.getVisualTemplateId() != null && task.getVisualTemplateId() > 0) {
+            visualTemplateService.getById(task.getVisualTemplateId())
+                    .ifPresent(t -> model.addAttribute("relatedTemplateName", t.getName()));
+        }
         if (id != null) {
             model.addAttribute("execLogs", taskScheduleService.getExecutionLogs(id));
         }
@@ -75,7 +83,7 @@ public class TaskController {
     public String delete(@PathVariable Long id) {
         log.info("删除任务, id={}", id);
         try {
-            taskScheduleService.delete(id);
+            taskScheduleService.deleteFromUi(id);
             log.info("任务删除成功, id={}", id);
         } catch (Exception e) {
             log.error("删除任务失败, id={}", id, e);

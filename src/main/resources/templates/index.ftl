@@ -29,10 +29,10 @@
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center">
                         <div>
-                            <h6 class="text-muted">模板</h6>
-                            <h3 class="mb-0">${templateCount!0}</h3>
+                            <h6 class="text-muted">可视化模板</h6>
+                            <h3 class="mb-0">${visualCount!0}</h3>
                         </div>
-                        <i class="bi bi-file-earmark-code text-success" style="font-size:2rem;"></i>
+                        <i class="bi bi-bezier2 text-success" style="font-size:2rem;"></i>
                     </div>
                 </div>
             </div>
@@ -42,10 +42,10 @@
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center">
                         <div>
-                            <h6 class="text-muted">流程配置</h6>
-                            <h3 class="mb-0">${flowCount!0}</h3>
+                            <h6 class="text-muted">定时任务</h6>
+                            <h3 class="mb-0">${taskCount!0}</h3>
                         </div>
-                        <i class="bi bi-diagram-3 text-info" style="font-size:2rem;"></i>
+                        <i class="bi bi-clock-history text-info" style="font-size:2rem;"></i>
                     </div>
                 </div>
             </div>
@@ -72,9 +72,10 @@
                 <div class="card-header">快捷操作</div>
                 <div class="card-body">
                     <div class="d-grid gap-2">
+                        <a href="/guide" class="btn btn-outline-secondary"><i class="bi bi-compass"></i> 新手引导（推荐先看）</a>
                         <a href="/datasource/form" class="btn btn-outline-primary"><i class="bi bi-plus-circle"></i> 新增数据源</a>
-                        <a href="/template/editor" class="btn btn-outline-success"><i class="bi bi-plus-circle"></i> 新增模板</a>
-                        <a href="/flow/wizard" class="btn btn-outline-info"><i class="bi bi-lightning-charge"></i> 创建对接流程</a>
+                        <a href="/visual/list" class="btn btn-outline-success"><i class="bi bi-bezier2"></i> 可视化模板</a>
+                        <a href="/publish/list" class="btn btn-outline-warning"><i class="bi bi-cloud-upload"></i> 发布管理</a>
                     </div>
                 </div>
             </div>

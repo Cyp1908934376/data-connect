@@ -1,222 +1,221 @@
 <#include "layouts/main.ftl">
 <@main title="数据对接服务 - 新手引导" activeMenu="guide">
 
-<div class="container-fluid" style="max-width: 900px;">
+<style>
+    .guide-step-num { width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: 600; font-size: 14px; }
+    .guide-ol { margin-bottom: 0; padding-left: 1.2rem; }
+    .guide-ol li { margin-bottom: .35rem; }
+    .guide-flow .badge { font-size: 13px; font-weight: 500; }
+</style>
 
-    <!-- 标题区 -->
-    <div class="text-center mb-5">
+<div class="container-fluid" style="max-width: 960px;">
+
+    <div class="text-center mb-4">
         <h3 class="fw-bold">欢迎使用数据对接服务</h3>
-        <p class="text-muted">零环境依赖，开箱即用的数据集成平台。跟着下面的步骤，快速完成你的第一个数据对接任务。</p>
+        <p class="text-muted mb-0">按下面顺序做一遍，就能完成「接口取数 → 写入数据库」，并可选定时或对外发布。</p>
     </div>
 
-    <!-- 总体流程图 -->
-    <div class="card mb-5 border-0 shadow-sm">
+    <div class="card mb-4 border-0 shadow-sm">
         <div class="card-body text-center py-4">
-            <div class="d-flex justify-content-center align-items-center flex-wrap gap-2" style="font-size: 14px;">
-                <span class="badge bg-primary px-3 py-2">① 添加数据源</span>
+            <div class="d-flex justify-content-center align-items-center flex-wrap gap-2 guide-flow">
+                <span class="badge bg-secondary px-3 py-2">① 驱动（按需）</span>
                 <span class="text-muted">→</span>
-                <span class="badge bg-success px-3 py-2">② 创建模板</span>
+                <span class="badge bg-primary px-3 py-2">② 数据源</span>
                 <span class="text-muted">→</span>
-                <span class="badge bg-info px-3 py-2">③ 配置映射</span>
+                <span class="badge bg-success px-3 py-2">③ 可视化模板</span>
                 <span class="text-muted">→</span>
-                <span class="badge bg-warning px-3 py-2">④ 建立流程</span>
+                <span class="badge bg-info px-3 py-2">④ 执行 / 定时</span>
                 <span class="text-muted">→</span>
-                <span class="badge bg-secondary px-3 py-2">⑤ 定时调度</span>
+                <span class="badge bg-warning text-dark px-3 py-2">⑤ 发布（可选）</span>
+            </div>
+            <div class="small text-muted mt-3">日常对接走「可视化模板」。定时保存后会出现在「任务管理」。</div>
+        </div>
+    </div>
+
+    <div class="card mb-4 border-start border-secondary border-4 shadow-sm">
+        <div class="card-body">
+            <h5 class="card-title mb-3">
+                <span class="guide-step-num bg-secondary text-white me-2">1</span>驱动管理 <span class="small text-muted fw-normal">（连非内置库时才需要）</span>
+            </h5>
+            <p class="text-muted">平台已带 MySQL / MariaDB 等常用驱动。连 <strong>Oracle、SQL Server、PostgreSQL</strong> 等时，先装对应 JDBC 包。</p>
+            <ol class="guide-ol small">
+                <li>打开 <strong>驱动管理</strong>。</li>
+                <li>点「下载驱动」从目录安装，或「上传驱动」选择本地 <code>.jar</code>。</li>
+                <li>在「已安装驱动」里能看到即可，再到数据源里选对应库类型。</li>
+            </ol>
+            <div class="mt-3">
+                <a href="/driver/list" class="btn btn-outline-secondary btn-sm"><i class="bi bi-box-seam"></i> 去驱动管理</a>
             </div>
         </div>
     </div>
 
-    <!-- 步骤 1：添加数据源 -->
     <div class="card mb-4 border-start border-primary border-4 shadow-sm">
         <div class="card-body">
             <h5 class="card-title text-primary mb-3">
-                <span class="badge bg-primary me-2">1</span>添加数据源
+                <span class="guide-step-num bg-primary text-white me-2">2</span>添加数据源
             </h5>
-            <p class="text-muted">数据源是数据对接的起点和终点。支持两种类型：</p>
-            <div class="row g-3 mt-2">
+            <p class="text-muted">数据源是拉数和写数的连接。接口、库各配一个，后面模板里直接选。</p>
+            <div class="row g-3">
                 <div class="col-md-6">
-                    <div class="border rounded p-3 bg-light">
-                        <h6><i class="bi bi-database"></i> 数据库数据源</h6>
-                        <ul class="mb-0 small text-muted">
-                            <li>支持 MySQL、PostgreSQL、Oracle、SQL Server 等 20+ 数据库</li>
-                            <li>配置连接信息后即可浏览表结构、执行 SQL 调试</li>
-                            <li>连接池自动管理，即配即用</li>
-                        </ul>
+                    <div class="border rounded p-3 h-100 bg-light">
+                        <h6 class="mb-2"><i class="bi bi-cloud-arrow-down"></i> 接口数据源</h6>
+                        <ol class="guide-ol small text-muted">
+                            <li>数据源管理 → 新增，类型选接口。</li>
+                            <li>填 URL、方法（GET/POST）。</li>
+                            <li>需要登录态时配置 Token 地址、取 Token 路径、查询参数名。</li>
+                            <li>保存后可用「测试」看返回结构。</li>
+                        </ol>
                     </div>
                 </div>
                 <div class="col-md-6">
-                    <div class="border rounded p-3 bg-light">
-                        <h6><i class="bi bi-cloud-arrow-down"></i> 接口数据源</h6>
-                        <ul class="mb-0 small text-muted">
-                            <li>支持 HTTP/HTTPS API 调用</li>
-                            <li>三种模式：单次调用、链式调用、Groovy 脚本编排</li>
-                            <li>支持 Header/Body 动态配置和变量替换</li>
-                        </ul>
+                    <div class="border rounded p-3 h-100 bg-light">
+                        <h6 class="mb-2"><i class="bi bi-database"></i> 数据库数据源</h6>
+                        <ol class="guide-ol small text-muted">
+                            <li>类型选数据库，选库类型（与已装驱动一致）。</li>
+                            <li>填主机、端口、库名、账号密码。</li>
+                            <li>点测试连接，成功后再保存。</li>
+                            <li>写库、读 SQL 都用这个数据源。</li>
+                        </ol>
                     </div>
                 </div>
             </div>
             <div class="mt-3">
-                <a href="/datasource/list" class="btn btn-outline-primary btn-sm"><i class="bi bi-arrow-right"></i> 去添加数据源</a>
+                <a href="/datasource/list" class="btn btn-outline-primary btn-sm"><i class="bi bi-database"></i> 去数据源管理</a>
+                <a href="/datasource/form" class="btn btn-primary btn-sm ms-1"><i class="bi bi-plus"></i> 新增数据源</a>
             </div>
         </div>
     </div>
 
-    <!-- 步骤 2：创建模板 -->
     <div class="card mb-4 border-start border-success border-4 shadow-sm">
         <div class="card-body">
             <h5 class="card-title text-success mb-3">
-                <span class="badge bg-success me-2">2</span>创建转换模板
+                <span class="guide-step-num bg-success text-white me-2">3</span>创建可视化模板
             </h5>
-            <p class="text-muted">模板是数据转换的核心，使用 Groovy 脚本定义数据处理逻辑。</p>
-            <div class="border rounded p-3 bg-light">
-                <pre class="mb-0" style="font-size: 13px; background: #f8f9fa;"><code><span style="color: #6c757d;">// 示例：字段转换模板</span>
-<span style="color: #0d6efd;">def</span> input = binding.input     <span style="color: #6c757d;">// 输入数据（自动注入）</span>
-<span style="color: #0d6efd;">def</span> params = binding.params   <span style="color: #6c757d;">// 模板参数（界面配置）</span>
-<span style="color: #0d6efd;">def</span> out = [:]                <span style="color: #6c757d;">// 输出数据</span>
-
-out.fullName = input.firstName + <span style="color: #198754;">' '</span> + input.lastName
-out.age = input.age + params.offset
-out.processedAt = <span style="color: #0d6efd;">new</span> Date().format(<span style="color: #198754;">'yyyy-MM-dd HH:mm:ss'</span>)</code></pre>
+            <p class="text-muted mb-2">这是主操作页：从上到下加事件，把「取数 → 过滤/转换 → 写表」串起来。典型：接口进主表，再写部门表。</p>
+            <ol class="guide-ol small">
+                <li>打开 <strong>可视化模板</strong> → 新增。</li>
+                <li><strong>输入事件</strong>：先选「手动触发」调试；要定时再改为「定时触发」并填 Cron（如每小时 <code>0 0 * * * ?</code>）。</li>
+                <li>点「添加事件步骤」→ <strong>数据源事件</strong>：选接口数据源，或直接填 URL；可设每批条数、增量字段。</li>
+                <li>再添加 <strong>操作事件</strong>：选库数据源，操作选新增，填目标表。
+                    <ul class="mt-1 mb-1">
+                        <li>字段映射：取值选「输入字段」，源字段填接口字段名。</li>
+                        <li>要去重：填<strong>唯一键</strong>（目标列名，如 <code>id</code>）。仅新增会跳过已存在；「存在则更新」会覆盖。</li>
+                        <li>返回方式保持「把接口原数据传给下一步」，才能再写第二张表。</li>
+                    </ul>
+                </li>
+                <li>需要部门等从表：可再加过滤 + 第二个操作事件，映射部门字段，同样填唯一键。</li>
+                <li>字段要中文转拼音首字母：映射里转换选「中文首字母」。</li>
+                <li>保存后，在列表点<strong>执行</strong>，看日志是否写入成功。</li>
+            </ol>
+            <div class="alert alert-light border small mb-0 mt-3">
+                增量同步的进度记在水位线里。要重新从头拉数：编辑模板，输入类型选定时，点「重置水位线」。这不会清空已写入的表数据。
             </div>
-            <ul class="mt-2 small text-muted">
-                <li>树形分类管理，支持版本历史与回滚</li>
-                <li>内置 CodeMirror 编辑器，支持 Groovy 语法高亮</li>
-                <li>可复用代码片段库，拖拽即用</li>
-            </ul>
             <div class="mt-3">
-                <a href="/template/list" class="btn btn-outline-success btn-sm"><i class="bi bi-arrow-right"></i> 去管理模板</a>
+                <a href="/visual/list" class="btn btn-success btn-sm"><i class="bi bi-bezier2"></i> 去可视化模板</a>
             </div>
         </div>
     </div>
 
-    <!-- 步骤 3：配置映射 -->
     <div class="card mb-4 border-start border-info border-4 shadow-sm">
         <div class="card-body">
             <h5 class="card-title text-info mb-3">
-                <span class="badge bg-info me-2">3</span>配置数据映射
+                <span class="guide-step-num bg-info text-white me-2">4</span>执行与定时
             </h5>
-            <p class="text-muted">定义源字段与目标字段之间的对应关系，支持字段级别的转换处理。</p>
-            <div class="row g-3 mt-2">
-                <div class="col-md-6">
-                    <div class="border rounded p-3 bg-light">
-                        <h6><i class="bi bi-table"></i> 列配置</h6>
-                        <p class="small text-muted mb-0">定义接收列（源）和推送列（目标）的结构，支持类型映射和默认值设置。</p>
-                    </div>
-                </div>
-                <div class="col-md-6">
-                    <div class="border rounded p-3 bg-light">
-                        <h6><i class="bi bi-arrow-left-right"></i> 映射模板</h6>
-                        <p class="small text-muted mb-0">建立 receiveKey → pushKey 的对应关系，支持 Postman JSON 导入。</p>
-                    </div>
-                </div>
-            </div>
-            <div class="mt-3">
-                <a href="/mapping/templateList" class="btn btn-outline-info btn-sm"><i class="bi bi-arrow-right"></i> 去配置映射</a>
+            <p class="text-muted">可视化模板<strong>不必</strong>再到「任务管理」里手工建任务：输入事件选定时并保存后，会自动出现在任务列表。</p>
+            <div class="table-responsive">
+                <table class="table table-sm table-bordered mb-0 small">
+                    <thead class="table-light">
+                        <tr><th style="width:28%;">你想做的</th><th>怎么做</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>马上跑一次</td>
+                            <td>可视化模板列表 → 执行。定时模板也可用「立即执行」。</td>
+                        </tr>
+                        <tr>
+                            <td>按点自动跑</td>
+                            <td>输入事件选「定时触发」，填 Cron，<strong>保存模板</strong>后生效，并出现在「任务管理」。写库请用唯一键 + 存在则更新，避免重复。</td>
+                        </tr>
+                        <tr>
+                            <td>看结果 / 排查</td>
+                            <td>执行日志里看每步 SQL 和行数；写入完成会提示新增、跳过重复。</td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
 
-    <!-- 步骤 4：建立流程 -->
     <div class="card mb-4 border-start border-warning border-4 shadow-sm">
         <div class="card-body">
-            <h5 class="card-title text-warning mb-3">
-                <span class="badge bg-warning text-dark me-2">4</span>建立对接流程
+            <h5 class="card-title mb-3">
+                <span class="guide-step-num bg-warning text-dark me-2">5</span>发布管理 <span class="small text-muted fw-normal">（把模板变成 HTTP 接口）</span>
             </h5>
-            <p class="text-muted">流程是数据对接的执行单元，将数据源、模板、映射串联成完整的 Pipeline。</p>
-            <div class="border rounded p-3 bg-light">
-                <div class="d-flex align-items-center gap-3 flex-wrap">
-                    <div class="text-center">
-                        <div class="border rounded p-2 bg-white">
-                            <i class="bi bi-box-arrow-in-right text-primary"></i>
-                            <div class="small mt-1">输入数据源</div>
-                        </div>
-                    </div>
-                    <span class="text-muted">→</span>
-                    <div class="text-center">
-                        <div class="border rounded p-2 bg-white">
-                            <i class="bi bi-gear text-success"></i>
-                            <div class="small mt-1">管道处理</div>
-                            <div class="xsmall text-muted">(模板转换/字段映射)</div>
-                        </div>
-                    </div>
-                    <span class="text-muted">→</span>
-                    <div class="text-center">
-                        <div class="border rounded p-2 bg-white">
-                            <i class="bi bi-box-arrow-right text-danger"></i>
-                            <div class="small mt-1">输出数据源</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <ul class="mt-2 small text-muted">
-                <li>四步向导式配置，清晰直观</li>
-                <li>管道阶段：读取后(AFTER_READ)、写入前(BEFORE_WRITE)、写入后(AFTER_WRITE)</li>
-                <li>支持全量同步和增量同步（按 ID 或时间字段）</li>
-                <li>增量同步自动保存水位点，断点续传</li>
-            </ul>
+            <p class="text-muted">给外部系统调用：保存模板后，到发布管理挂上可视化模板。</p>
+            <ol class="guide-ol small">
+                <li>发布管理 → 新增发布。</li>
+                <li>「关联可视化模板」选刚保存的模板。</li>
+                <li>端口可用「自动分配」，路径如 <code>/api/data</code>。</li>
+                <li>保存后点<strong>启动</strong>。按页面给出的内部/外部地址 POST 调用。</li>
+                <li>不需要对外时，停用即可，不影响模板自己的定时执行。</li>
+            </ol>
             <div class="mt-3">
-                <a href="/flow/list" class="btn btn-outline-warning btn-sm"><i class="bi bi-arrow-right"></i> 去创建流程</a>
+                <a href="/publish/list" class="btn btn-outline-warning btn-sm"><i class="bi bi-cloud-upload"></i> 去发布管理</a>
             </div>
         </div>
     </div>
 
-    <!-- 步骤 5：任务调度 -->
-    <div class="card mb-4 border-start border-secondary border-4 shadow-sm">
-        <div class="card-body">
-            <h5 class="card-title text-secondary mb-3">
-                <span class="badge bg-secondary me-2">5</span>创建调度任务
-            </h5>
-            <p class="text-muted">将流程配置为定时任务，按 Cron 表达式自动执行，无需人工干预。</p>
-            <div class="border rounded p-3 bg-light">
-                <table class="table table-sm mb-0">
-                    <tr><td class="text-muted">Cron 示例</td><td><code>0 0 2 * * ?</code> — 每天凌晨 2 点执行</td></tr>
-                    <tr><td class="text-muted">状态管理</td><td>RUNNING（运行中）/ PAUSED（暂停）/ STOPPED（停止）</td></tr>
-                    <tr><td class="text-muted">执行日志</td><td>每次执行记录 SQL 日志和控制台输出，方便排查</td></tr>
-                </table>
-            </div>
-            <div class="mt-3">
-                <a href="/task/list" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-right"></i> 去管理任务</a>
-            </div>
-        </div>
-    </div>
-
-    <!-- 核心概念 -->
     <div class="card mb-4 border-0 shadow-sm">
         <div class="card-header bg-white">
-            <h5 class="mb-0"><i class="bi bi-lightbulb text-warning"></i> 核心概念速览</h5>
+            <h5 class="mb-0"><i class="bi bi-clock-history"></i> 任务管理</h5>
         </div>
-        <div class="card-body">
-            <div class="table-responsive">
-                <table class="table table-borderless mb-0">
-                    <tr>
-                        <td class="fw-bold" style="width: 120px;">数据源</td>
-                        <td class="text-muted">数据的来源或去向，可以是数据库（JDBC 连接）或 HTTP 接口</td>
-                    </tr>
-                    <tr>
-                        <td class="fw-bold">模板</td>
-                        <td class="text-muted">Groovy 脚本，定义如何将输入数据转换为输出数据</td>
-                    </tr>
-                    <tr>
-                        <td class="fw-bold">映射</td>
-                        <td class="text-muted">源字段名与目标字段名的对应关系（receiveKey → pushKey）</td>
-                    </tr>
-                    <tr>
-                        <td class="fw-bold">流程</td>
-                        <td class="text-muted">完整的 ETL Pipeline：输入 → 管道处理 → 输出</td>
-                    </tr>
-                    <tr>
-                        <td class="fw-bold">任务</td>
-                        <td class="text-muted">流程的定时调度配置，支持 Cron 表达式</td>
-                    </tr>
-                </table>
-            </div>
+        <div class="card-body small text-muted">
+            <p>可视化模板选「定时触发」并保存后，会自动出现在任务列表，可在这里暂停、改 Cron。</p>
+            <a href="/task/list" class="btn btn-outline-secondary btn-sm"><i class="bi bi-clock-history"></i> 去任务管理</a>
         </div>
     </div>
 
-    <!-- 提示 -->
+    <div class="card mb-4 border-0 shadow-sm">
+        <div class="card-header bg-white">
+            <h5 class="mb-0"><i class="bi bi-lightbulb text-warning"></i> 名词对照</h5>
+        </div>
+        <div class="card-body p-0">
+            <table class="table table-borderless mb-0">
+                <tr>
+                    <td class="fw-bold ps-3" style="width: 130px;">驱动</td>
+                    <td class="text-muted">连接某种数据库所需的 JDBC 包，装一次即可</td>
+                </tr>
+                <tr>
+                    <td class="fw-bold ps-3">数据源</td>
+                    <td class="text-muted">一组连接信息：库或 HTTP 接口</td>
+                </tr>
+                <tr>
+                    <td class="fw-bold ps-3">可视化模板</td>
+                    <td class="text-muted">用事件步骤编排的取数/写数流程，推荐日常使用</td>
+                </tr>
+                <tr>
+                    <td class="fw-bold ps-3">唯一键</td>
+                    <td class="text-muted">写库时用来判断「这行已经有了」的目标列，如 id、部门编码</td>
+                </tr>
+                <tr>
+                    <td class="fw-bold ps-3">水位线</td>
+                    <td class="text-muted">增量/分批已经拉到哪；重置后下次从头拉，不清空目标表</td>
+                </tr>
+                <tr>
+                    <td class="fw-bold ps-3">发布</td>
+                    <td class="text-muted">把可视化模板暴露成 HTTP 接口</td>
+                </tr>
+                <tr>
+                    <td class="fw-bold ps-3">任务</td>
+                    <td class="text-muted">定时调度：可视化模板的 Cron 会自动出现在任务列表</td>
+                </tr>
+            </table>
+        </div>
+    </div>
+
     <div class="alert alert-info border-0 shadow-sm">
-        <i class="bi bi-info-circle"></i> <strong>提示：</strong>
-        建议按顺序完成以上步骤。首次使用可先在"数据源管理"中添加一个数据源并测试连接，熟悉基本操作后再逐步深入。
+        <i class="bi bi-info-circle"></i>
+        建议第一次：<strong>接口数据源 + 库数据源 → 可视化模板写一张表 → 列表执行一次</strong>。跑通后再加定时、第二张表或发布。
     </div>
 
 </div>

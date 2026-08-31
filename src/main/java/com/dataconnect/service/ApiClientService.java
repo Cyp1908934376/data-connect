@@ -470,7 +470,7 @@ public class ApiClientService {
     }
 
     private OkHttpClient buildClient(DsConfig config) {
-        int timeout = config.getApiTimeout() != null ? config.getApiTimeout() : 30;
+        int timeout = config.getApiTimeout() != null ? config.getApiTimeout() : 180;
         return defaultClient.newBuilder()
                 .connectTimeout(timeout, TimeUnit.SECONDS)
                 .readTimeout(timeout, TimeUnit.SECONDS)

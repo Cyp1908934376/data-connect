@@ -1,9 +1,13 @@
 <#include "../layouts/main.ftl">
 <@main title="任务配置" activeMenu="task">
 
+<#assign visual = ((task.taskType)!'FLOW') == 'VISUAL'/>
+
 <div class="container-fluid">
     <form method="post" action="/task/save">
         <input type="hidden" name="id" value="${(task.id)!''}">
+        <input type="hidden" name="taskType" value="${(task.taskType)!'FLOW'}">
+        <input type="hidden" name="visualTemplateId" value="${(task.visualTemplateId)!0}">
 
         <div class="row mb-3">
             <div class="col-md-6">
@@ -11,15 +15,22 @@
                 <input type="text" name="name" class="form-control" value="${(task.name)!''}" required>
             </div>
             <div class="col-md-6">
-                <label class="form-label">关联流程</label>
-                <select name="flowConfigId" class="form-select" required>
-                    <option value="">-- 选择对接流程 --</option>
-                    <#if flows??>
-                        <#list flows as f>
-                            <option value="${f.id}" <#if task.flowConfigId?? && task.flowConfigId == f.id>selected</#if>>${f.name}</option>
-                        </#list>
-                    </#if>
-                </select>
+                <#if visual>
+                    <label class="form-label">关联可视化模板</label>
+                    <input type="hidden" name="flowConfigId" value="0">
+                    <div class="form-control bg-light"><#if relatedTemplateName??>${relatedTemplateName}<#else>模板 #${(task.visualTemplateId)!''}</#if></div>
+                    <div class="form-text">输入事件的定时会同步到此任务。也可到 <a href="/visual/list">可视化模板</a> 修改。</div>
+                <#else>
+                    <label class="form-label">关联流程</label>
+                    <select name="flowConfigId" class="form-select" required>
+                        <option value="">-- 选择对接流程 --</option>
+                        <#if flows??>
+                            <#list flows as f>
+                                <option value="${f.id}" <#if task.flowConfigId?? && task.flowConfigId == f.id>selected</#if>>${f.name}</option>
+                            </#list>
+                        </#if>
+                    </select>
+                </#if>
             </div>
         </div>
 

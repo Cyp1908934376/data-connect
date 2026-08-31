@@ -68,11 +68,10 @@
 | 按钮 | 地址 | 功能 |
 |---|---|---|
 | 数据源管理 | `/datasource/list` | 管理输入/输出数据源配置 |
-| 对接模板 | `/mapping/templateList` | 管理字段映射模板 |
-| 列配置 | `/mapping/columnConfig` | 管理输入/输出列定义 |
-| 流程配置 | `/flow/list` | 创建和管理对接流程 |
-| 任务管理 | `/task/list` | 创建和管理定时任务 |
-| 模板管理 | `/template/list` | 管理 Groovy 模板和代码片段 |
+| 可视化模板 | `/visual/list` | 编排取数/映射/写库/推送 |
+| 任务管理 | `/task/list` | 查看和暂停可视化模板的定时 |
+| 发布管理 | `/publish/list` | 把可视化模板暴露成 HTTP 接口 |
+| 事件管理 | `/event/list` | 映射转换等可复用事件 |
 | 驱动管理 | `/driver/list` | 管理 JDBC 驱动 |
 | API 文档 | `/doc.html` | Knife4j 接口文档 |
 | 策略文档 | `/docs/sync-strategy` | 同步策略说明（本页面） |

@@ -20,6 +20,8 @@ public class ExecutionLogFileService {
     private static final Logger log = LoggerFactory.getLogger(ExecutionLogFileService.class);
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private static final String BASE_PATH = "./logs/flow/";
+    private static final String VISUAL_PATH = "./logs/visual/";
+    private static final int MAX_TEMPLATE_LOGS = 30;
 
     /**
      * Load watermark from file. Returns null if file does not exist or is corrupted.
@@ -54,22 +56,124 @@ public class ExecutionLogFileService {
         }
     }
 
+    public Map<String, Object> loadVisualWatermark(Long templateId) {
+        Path file = getVisualWatermarkPath(templateId);
+        if (!Files.exists(file)) {
+            return null;
+        }
+        try {
+            String content = new String(Files.readAllBytes(file));
+            return objectMapper.readValue(content, new TypeReference<Map<String, Object>>() {});
+        } catch (Exception e) {
+            log.warn("可视化模板水位线读取失败, templateId={}, error={}", templateId, e.getMessage());
+            return null;
+        }
+    }
+
+    public void saveVisualWatermark(Long templateId, Map<String, Object> watermarkData) {
+        Path file = getVisualWatermarkPath(templateId);
+        try {
+            Files.createDirectories(file.getParent());
+            String json = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(watermarkData);
+            Files.write(file, json.getBytes());
+            log.info("可视化模板水位线已保存, templateId={}, lastValue={}, lastOffset={}",
+                    templateId, watermarkData.get("lastValue"), watermarkData.get("lastOffset"));
+        } catch (IOException e) {
+            log.error("可视化模板水位线写入失败, templateId={}", templateId, e);
+        }
+    }
+
+    public boolean deleteVisualWatermark(Long templateId) {
+        Path file = getVisualWatermarkPath(templateId);
+        try {
+            return Files.deleteIfExists(file);
+        } catch (IOException e) {
+            log.warn("删除可视化模板水位线失败, templateId={}", templateId, e);
+            return false;
+        }
+    }
+
     /**
      * Write execution log to a timestamped JSON file.
      */
     public String writeExecutionLog(Long flowConfigId, Map<String, Object> executionData) {
+        return writeExecutionLogTo(getFlowDir(flowConfigId), flowConfigId, "flow", executionData, 0);
+    }
+
+    public String writeTemplateExecutionLog(Long templateId, Map<String, Object> executionData) {
+        String filename = writeExecutionLogTo(getVisualDir(templateId), templateId, "visual", executionData, MAX_TEMPLATE_LOGS);
+        return filename;
+    }
+
+    public List<String> listTemplateExecutionLogs(Long templateId) {
+        return listExecutionLogsIn(getVisualDir(templateId));
+    }
+
+    public Map<String, Object> readTemplateExecutionLog(Long templateId, String filename) {
+        return readExecutionLogIn(getVisualDir(templateId), filename);
+    }
+
+    private String writeExecutionLogTo(Path dir, Long id, String kind, Map<String, Object> executionData, int keepMax) {
         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS"));
         String filename = "execution-" + timestamp + ".json";
-        Path file = getFlowDir(flowConfigId).resolve(filename);
+        Path file = dir.resolve(filename);
         try {
-            Files.createDirectories(file.getParent());
+            Files.createDirectories(dir);
             String json = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(executionData);
             Files.write(file, json.getBytes());
-            log.info("执行日志已写入, flowConfigId={}, file={}", flowConfigId, filename);
+            log.info("执行日志已写入, kind={}, id={}, file={}", kind, id, filename);
+            if (keepMax > 0) {
+                trimOldLogs(dir, keepMax);
+            }
         } catch (IOException e) {
-            log.error("执行日志写入失败, flowConfigId={}", flowConfigId, e);
+            log.error("执行日志写入失败, kind={}, id={}", kind, id, e);
         }
         return filename;
+    }
+
+    private void trimOldLogs(Path dir, int keepMax) {
+        List<String> files = listExecutionLogsIn(dir);
+        if (files.size() <= keepMax) {
+            return;
+        }
+        for (int i = keepMax; i < files.size(); i++) {
+            try {
+                Files.deleteIfExists(dir.resolve(files.get(i)));
+            } catch (IOException ignored) {
+            }
+        }
+    }
+
+    private List<String> listExecutionLogsIn(Path dir) {
+        if (!Files.exists(dir)) return Collections.emptyList();
+        try (Stream<Path> stream = Files.list(dir)) {
+            return stream
+                    .filter(p -> p.getFileName().toString().startsWith("execution-") && p.getFileName().toString().endsWith(".json"))
+                    .map(p -> p.getFileName().toString())
+                    .sorted(Comparator.reverseOrder())
+                    .collect(Collectors.toList());
+        } catch (IOException e) {
+            log.warn("列出执行日志失败, dir={}", dir, e);
+            return Collections.emptyList();
+        }
+    }
+
+    private Map<String, Object> readExecutionLogIn(Path dir, String filename) {
+        if (filename.contains("..") || filename.contains("/") || filename.contains("\\")) {
+            log.warn("非法文件名, filename={}", filename);
+            return null;
+        }
+        Path file = dir.resolve(filename);
+        if (!Files.exists(file)) {
+            return null;
+        }
+        try {
+            String content = new String(Files.readAllBytes(file));
+            return objectMapper.readValue(content, new TypeReference<Map<String, Object>>() {});
+        } catch (Exception e) {
+            log.warn("执行日志读取失败, file={}", file, e);
+            return null;
+        }
     }
 
     /**
@@ -152,8 +256,16 @@ public class ExecutionLogFileService {
         return Paths.get(BASE_PATH + flowConfigId);
     }
 
+    private Path getVisualDir(Long templateId) {
+        return Paths.get(VISUAL_PATH + templateId);
+    }
+
     private Path getWatermarkPath(Long flowConfigId) {
         return getFlowDir(flowConfigId).resolve("watermark.json");
+    }
+
+    private Path getVisualWatermarkPath(Long templateId) {
+        return getVisualDir(templateId).resolve("watermark.json");
     }
 
     private Path getSyncedIdsPath(Long flowConfigId) {

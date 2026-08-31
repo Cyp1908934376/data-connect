@@ -3,11 +3,11 @@ package com.dataconnect.pipeline;
 import java.util.Map;
 
 /**
- * 管道步骤：一个具体的处理步骤，可以是模板执行或映射转换。
+ * 管道步骤：一个具体的处理步骤，可以是模板执行、映射转换或可视化模板。
  */
 public class PipelineStep {
 
-    /** 步骤类型：TEMPLATE(模板管理中的Groovy模板) / MAPPING(数据对接模板) */
+    /** 步骤类型：TEMPLATE(模板管理中的Groovy模板) / MAPPING(数据对接模板) / VISUAL_TEMPLATE(可视化模板) */
     private String type;
 
     /** 当 type=TEMPLATE 时，关联的模板ID */
@@ -15,6 +15,9 @@ public class PipelineStep {
 
     /** 当 type=MAPPING 时，关联的数据对接模板ID */
     private Long mappingTemplateId;
+
+    /** 当 type=VISUAL_TEMPLATE 时，关联的可视化模板ID */
+    private Long visualTemplateId;
 
     /** 该步骤的额外参数（会传递给模板的params绑定变量） */
     private Map<String, Object> params;
@@ -25,6 +28,8 @@ public class PipelineStep {
     public void setTemplateId(Long templateId) { this.templateId = templateId; }
     public Long getMappingTemplateId() { return mappingTemplateId; }
     public void setMappingTemplateId(Long mappingTemplateId) { this.mappingTemplateId = mappingTemplateId; }
+    public Long getVisualTemplateId() { return visualTemplateId; }
+    public void setVisualTemplateId(Long visualTemplateId) { this.visualTemplateId = visualTemplateId; }
     public Map<String, Object> getParams() { return params; }
     public void setParams(Map<String, Object> params) { this.params = params; }
 }

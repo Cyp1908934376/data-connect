@@ -12,6 +12,8 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
@@ -76,18 +78,22 @@ public class DynamicDsManager {
             hikariConfig.setMinimumIdle(config.getMinIdle() != null ? config.getMinIdle() : 2);
             hikariConfig.setConnectionTimeout((config.getConnTimeout() != null ? config.getConnTimeout() : 30) * 1000L);
 
-            Properties props = new Properties();
-            if (config.getCharset() != null && !config.getCharset().isEmpty()) {
-                props.setProperty("characterEncoding", config.getCharset());
-            }
-            if (config.getJdbcParams() != null && !config.getJdbcParams().isEmpty()) {
-                String[] pairs = config.getJdbcParams().split("&");
-                for (String pair : pairs) {
-                    String[] kv = pair.split("=", 2);
-                    if (kv.length == 2) props.setProperty(kv[0], kv[1]);
+            if (!isSqlServer(config.getDbType())) {
+                Properties props = new Properties();
+                if (config.getCharset() != null && !config.getCharset().isEmpty()) {
+                    props.setProperty("characterEncoding", config.getCharset());
+                }
+                if (config.getJdbcParams() != null && !config.getJdbcParams().isEmpty()) {
+                    String[] pairs = config.getJdbcParams().split("[&;]");
+                    for (String pair : pairs) {
+                        String[] kv = pair.split("=", 2);
+                        if (kv.length == 2) props.setProperty(kv[0].trim(), kv[1].trim());
+                    }
+                }
+                if (!props.isEmpty()) {
+                    hikariConfig.setDataSourceProperties(props);
                 }
             }
-            hikariConfig.setDataSourceProperties(props);
 
             HikariDataSource ds = new HikariDataSource(hikariConfig);
             log.info("连接池创建成功, dsId={}, name={}, url={}", config.getId(), config.getName(), jdbcUrl);
@@ -99,19 +105,29 @@ public class DynamicDsManager {
     }
 
     public boolean testConnection(DsConfig config) {
+        return testConnectionWithMessage(config).containsKey("success")
+                && Boolean.TRUE.equals(testConnectionWithMessage(config).get("success"));
+    }
+
+    public Map<String, Object> testConnectionWithMessage(DsConfig config) {
         String jdbcUrl = buildJdbcUrl(config);
         String driverClass = getDriverClass(config.getDbType());
+        Map<String, Object> result = new LinkedHashMap<>();
         log.info("测试数据库连接, name={}, dbType={}, host={}:{}", config.getName(), config.getDbType(), config.getHost(), config.getPort());
         try {
             Class.forName(driverClass);
             try (Connection conn = DriverManager.getConnection(jdbcUrl, config.getUsername(), config.getPassword())) {
                 boolean valid = conn.isValid(10);
                 log.info("连接测试{}, name={}", valid ? "成功" : "失败", config.getName());
-                return valid;
+                result.put("success", valid);
+                result.put("message", valid ? "连接成功" : "连接验证失败");
+                return result;
             }
         } catch (Exception e) {
             log.warn("Connection test failed for {}: {}", config.getName(), e.getMessage());
-            return false;
+            result.put("success", false);
+            result.put("message", e.getMessage() != null ? e.getMessage() : "连接失败");
+            return result;
         }
     }
 
@@ -130,11 +146,10 @@ public class DynamicDsManager {
             return String.format("jdbc:postgresql://%s:%d/%s",
                     host, port != null ? port : 5432, dbName);
         } else if ("Oracle".equalsIgnoreCase(dbType)) {
-            return String.format("jdbc:oracle:thin:@%s:%d:%s",
+            return String.format("jdbc:oracle:thin:@//%s:%d/%s",
                     host, port != null ? port : 1521, dbName);
-        } else if ("SQL Server".equalsIgnoreCase(dbType)) {
-            return String.format("jdbc:sqlserver://%s:%d;databaseName=%s",
-                    host, port != null ? port : 1433, dbName);
+        } else if (isSqlServer(dbType)) {
+            return buildSqlServerUrl(config);
         } else if ("SQLite".equalsIgnoreCase(dbType)) {
             return String.format("jdbc:sqlite:%s", dbName);
         } else if ("H2".equalsIgnoreCase(dbType)) {
@@ -178,6 +193,48 @@ public class DynamicDsManager {
         return String.format("jdbc:%s://%s:%d/%s", dbType.toLowerCase(), host, port, dbName);
     }
 
+    static boolean isSqlServer(String dbType) {
+        if (dbType == null) {
+            return false;
+        }
+        String t = dbType.toLowerCase(Locale.ROOT).replace(" ", "");
+        return t.contains("sqlserver") || t.contains("mssql");
+    }
+
+    /**
+     * 界面保存的类型是 SqlServer，必须用 databaseName=，不能写成 /库名。
+     * 内网 SQL Server 多数未配 TLS，驱动 10+ 默认 encrypt=true 会握手失败。
+     */
+    private String buildSqlServerUrl(DsConfig config) {
+        String host = config.getHost() != null ? config.getHost().trim() : "";
+        Integer port = config.getPort();
+        String dbName = config.getDbName();
+        StringBuilder url = new StringBuilder("jdbc:sqlserver://").append(host);
+        if (!host.contains(":")) {
+            url.append(":").append(port != null && port > 0 ? port : 1433);
+        }
+        if (dbName != null && !dbName.trim().isEmpty()) {
+            url.append(";databaseName=").append(dbName.trim());
+        }
+        boolean ssl = config.getSslEnabled() != null && config.getSslEnabled() == 1;
+        String extra = config.getJdbcParams() != null ? config.getJdbcParams() : "";
+        String extraNorm = extra.replace("&", ";").toLowerCase(Locale.ROOT);
+        if (!extraNorm.contains("encrypt=")) {
+            url.append(ssl ? ";encrypt=true" : ";encrypt=false");
+        }
+        if (!extraNorm.contains("trustservercertificate=")) {
+            url.append(";trustServerCertificate=true");
+        }
+        if (extra != null && !extra.trim().isEmpty()) {
+            String params = extra.trim().replace("&", ";");
+            if (!params.startsWith(";")) {
+                url.append(';');
+            }
+            url.append(params);
+        }
+        return url.toString();
+    }
+
     public String getDriverClass(String dbType) {
         if ("MySQL".equalsIgnoreCase(dbType) || "TiDB".equalsIgnoreCase(dbType) || "OceanBase".equalsIgnoreCase(dbType)) {
             return "com.mysql.cj.jdbc.Driver";
@@ -187,7 +244,7 @@ public class DynamicDsManager {
             return "org.postgresql.Driver";
         } else if ("Oracle".equalsIgnoreCase(dbType)) {
             return "oracle.jdbc.OracleDriver";
-        } else if ("SQL Server".equalsIgnoreCase(dbType)) {
+        } else if (isSqlServer(dbType)) {
             return "com.microsoft.sqlserver.jdbc.SQLServerDriver";
         } else if ("SQLite".equalsIgnoreCase(dbType)) {
             return "org.sqlite.JDBC";

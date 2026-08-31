@@ -14,7 +14,7 @@ public class TaskConfig {
     @Column(nullable = false, length = 200)
     private String name;
 
-    @Column(name = "flow_config_id", nullable = false)
+    @Column(name = "flow_config_id")
     private Long flowConfigId;
 
     @Column(name = "cron_expr", length = 100)
@@ -22,6 +22,13 @@ public class TaskConfig {
 
     @Column(length = 20)
     private String status;  // RUNNING/PAUSED/STOPPED
+
+    /** FLOW=对接流程任务；VISUAL=可视化模板输入事件定时 */
+    @Column(name = "task_type", length = 20)
+    private String taskType;
+
+    @Column(name = "visual_template_id")
+    private Long visualTemplateId;
 
     @Column(name = "retry_times")
     private Integer retryTimes;
@@ -46,6 +53,9 @@ public class TaskConfig {
         createTime = LocalDateTime.now();
         updateTime = LocalDateTime.now();
         if (status == null) status = "STOPPED";
+        if (taskType == null || taskType.isEmpty()) taskType = "FLOW";
+        if (flowConfigId == null) flowConfigId = 0L;
+        if (visualTemplateId == null) visualTemplateId = 0L;
         if (retryTimes == null) retryTimes = 3;
         if (retryInterval == null) retryInterval = 60;
         if (timeout == null) timeout = 3600;
@@ -66,6 +76,13 @@ public class TaskConfig {
     public void setCronExpr(String cronExpr) { this.cronExpr = cronExpr; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+    public String getTaskType() { return taskType; }
+    public void setTaskType(String taskType) { this.taskType = taskType; }
+    public Long getVisualTemplateId() { return visualTemplateId; }
+    public void setVisualTemplateId(Long visualTemplateId) { this.visualTemplateId = visualTemplateId; }
+    public boolean isVisual() {
+        return "VISUAL".equalsIgnoreCase(taskType);
+    }
     public Integer getRetryTimes() { return retryTimes; }
     public void setRetryTimes(Integer retryTimes) { this.retryTimes = retryTimes; }
     public Integer getRetryInterval() { return retryInterval; }

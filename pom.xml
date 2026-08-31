@@ -122,6 +122,18 @@
             <artifactId>knife4j-openapi2-spring-boot-starter</artifactId>
             <version>4.3.0</version>
         </dependency>
+
+        <!-- HTML 解析 + HTML 转 PDF（附件下载步骤） -->
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>1.17.2</version>
+        </dependency>
+        <dependency>
+            <groupId>com.openhtmltopdf</groupId>
+            <artifactId>openhtmltopdf-pdfbox</artifactId>
+            <version>1.0.10</version>
+        </dependency>
     </dependencies>
 
     <build>
@@ -166,7 +178,7 @@
                                 <!-- MariaDB -->
                                 <artifactItem><groupId>org.mariadb.jdbc</groupId><artifactId>mariadb-java-client</artifactId><version>3.1.4</version></artifactItem>
                                 <!-- Oracle -->
-                                <artifactItem><groupId>com.oracle.database.jdbc</groupId><artifactId>ojdbc8</artifactId><version>19.8.0.0</version></artifactItem>
+                                <artifactItem><groupId>com.oracle.database.jdbc</groupId><artifactId>ojdbc8</artifactId><version>19.3.0.0</version></artifactItem>
                                 <!-- SQLite -->
                                 <artifactItem><groupId>org.xerial</groupId><artifactId>sqlite-jdbc</artifactId><version>3.36.0.3</version></artifactItem>
                                 <!-- ClickHouse -->
@@ -195,8 +207,7 @@
                                 <artifactItem><groupId>com.sap.cloud.db.jdbc</groupId><artifactId>ngdbc</artifactId><version>2.17.12</version></artifactItem>
                                 <!-- Snowflake -->
                                 <artifactItem><groupId>net.snowflake</groupId><artifactId>snowflake-jdbc</artifactId><version>3.14.0</version></artifactItem>
-                                <!-- InfluxDB -->
-                                <artifactItem><groupId>com.influxdb</groupId><artifactId>influxdb-client-java</artifactId><version>6.8.0</version></artifactItem>
+                                <!-- InfluxDB (非纯JDBC驱动，自带Jackson会冲突，需手动下载) -->
                             </artifactItems>
                             <outputDirectory>${project.build.directory}/drivers</outputDirectory>
                             <!-- 不下载传递依赖，用户只需驱动 jar 本身 -->

@@ -32,7 +32,7 @@ public class AuthInterceptor implements HandlerInterceptor {
     private static final String LOGIN_PATH = "/login";
     private static final String[] EXCLUDE_PATHS = {
             "/login", "/static/", "/h2-console", "/css/", "/js/", "/fonts/", "/codemirror/",
-            "/doc.html", "/swagger-ui/", "/v3/api-docs", "/webjars/"
+            "/doc.html", "/swagger-ui/", "/v3/api-docs", "/webjars/", "/mock/"
     };
 
     public static String createToken(String username) {

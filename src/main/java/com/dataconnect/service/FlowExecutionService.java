@@ -1,5 +1,6 @@
 package com.dataconnect.service;
 
+import com.dataconnect.component.DataPacket;
 import com.dataconnect.entity.ColumnConfig;
 import com.dataconnect.entity.DsConfig;
 import com.dataconnect.entity.FlowConfig;
@@ -8,6 +9,8 @@ import com.dataconnect.entity.TemplateEntity;
 import com.dataconnect.pipeline.PipelineStage;
 import com.dataconnect.pipeline.PipelineStep;
 import com.dataconnect.repository.FlowConfigRepository;
+import com.dataconnect.util.SqlDialect;
+import com.dataconnect.util.SqlPageWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -53,6 +56,9 @@ public class FlowExecutionService {
 
     @Autowired
     private ThesisArchiveService thesisArchiveService;
+
+    @Autowired
+    private VisualTemplateExecutionService visualTemplateExecutionService;
 
     // ==================== 执行控制 ====================
     private volatile boolean executionCancelled = false;
@@ -334,28 +340,42 @@ public class FlowExecutionService {
                 return rows;
             }
 
-            // Build incremental SQL
+            // Build SQL: 优先使用自定义查询SQL，否则使用默认的 SELECT * FROM table
+            String customSql = dsConfig.getCustomQuerySql();
+            String sql;
+            if (customSql != null && !customSql.trim().isEmpty()) {
+                // 使用自定义查询SQL
+                sql = customSql.trim();
+                addLog("INFO", "使用自定义查询SQL");
+            } else {
+                // 默认查询
+                sql = "SELECT * FROM " + SqlDialect.quoteIdent(targetTable, dsConfig.getDbType());
+            }
+
+            // 增量同步：添加 WHERE 条件
             String incCol = flowConfig.getIncrementalColumn();
-            String sql = "SELECT * FROM " + targetTable;
             if (strategy != SyncStrategy.FULL && watermark != null && incCol != null && !incCol.isEmpty()) {
-                // Validate incremental column name to prevent SQL injection
-                if (!incCol.matches("^[a-zA-Z_][a-zA-Z0-9_]*$")) {
+                if (!SqlDialect.isSafeIdent(incCol)) {
                     addLog("ERROR", "无效的增量列名: " + incCol);
                     log.error("无效的增量列名: {}", incCol);
                     return rows;
                 }
                 Object lastVal = watermark.get("lastValue");
                 if (lastVal != null) {
-                    if (strategy == SyncStrategy.INCREMENTAL_ID) {
-                        sql += " WHERE " + incCol + " > " + lastVal + " ORDER BY " + incCol;
-                    } else {
-                        // Use >= for time-based to avoid losing rows with same timestamp
-                        // Upsert on write side handles any duplicates from re-read
-                        sql += " WHERE " + incCol + " >= '" + lastVal + "' ORDER BY " + incCol;
+                    String dbType = dsConfig.getDbType();
+                    String quotedCol = SqlDialect.quoteIdent(incCol, dbType);
+                    String upperSql = sql.toUpperCase();
+                    String connector = upperSql.contains("WHERE") ? " AND " : " WHERE ";
+                    sql += connector + quotedCol + " > " + SqlDialect.quoteLiteral(lastVal);
+                    if (!upperSql.contains("ORDER BY")) {
+                        sql += " ORDER BY " + quotedCol;
                     }
                 }
             }
-            sql += " LIMIT 1000";
+
+            if (customSql == null || customSql.trim().isEmpty()) {
+                sql = SqlPageWrapper.wrapFirstPage(sql, dsConfig.getDbType(), 1000);
+            }
 
             addLog("DEBUG", "读取表: " + targetTable + " SQL: " + sql);
             try (Statement stmt = conn.createStatement();
@@ -852,6 +872,37 @@ public class FlowExecutionService {
             return result;
         }
 
+        // 可视化模板处理
+        if ("VISUAL_TEMPLATE".equals(step.getType())) {
+            if (step.getVisualTemplateId() == null) {
+                addLog("WARN", "步骤未设置可视化模板ID，跳过");
+                return data;
+            }
+            addLog("INFO", "执行可视化模板, templateId=" + step.getVisualTemplateId());
+
+            // 构建输入数据包
+            DataPacket inputPacket = DataPacket.ofList(data);
+            if (step.getParams() != null) {
+                for (Map.Entry<String, Object> entry : step.getParams().entrySet()) {
+                    inputPacket.setVariable(entry.getKey(), entry.getValue());
+                }
+            }
+
+            // 执行可视化模板
+            DataPacket resultPacket = visualTemplateExecutionService.execute(step.getVisualTemplateId(), inputPacket);
+
+            if (resultPacket.isSuccess()) {
+                addLog("INFO", "可视化模板执行完成, 输出行数=" + resultPacket.size());
+                return resultPacket.getRows();
+            } else {
+                addLog("ERROR", "可视化模板执行失败: " + resultPacket.getErrorMessage());
+                if (stopOnError) {
+                    throw new RuntimeException("可视化模板执行失败: " + resultPacket.getErrorMessage());
+                }
+                return data;
+            }
+        }
+
         addLog("WARN", "未知步骤类型: " + step.getType() + "，跳过");
         return data;
     }
@@ -906,7 +957,7 @@ public class FlowExecutionService {
                 if (row.isEmpty()) continue;
                 try {
                     if (strategy == SyncStrategy.FULL) {
-                        executeInsert(conn, tableName, row);
+                        executeInsert(conn, tableName, row, dbType);
                     } else {
                         executeUpsert(conn, tableName, row, dbType);
                     }
@@ -927,12 +978,12 @@ public class FlowExecutionService {
         return count;
     }
 
-    private void executeInsert(Connection conn, String tableName, Map<String, Object> row) throws SQLException {
-        StringBuilder sql = new StringBuilder("INSERT INTO " + tableName + " (");
+    private void executeInsert(Connection conn, String tableName, Map<String, Object> row, String dbType) throws SQLException {
+        StringBuilder sql = new StringBuilder("INSERT INTO " + SqlDialect.quoteIdent(tableName, dbType) + " (");
         StringBuilder values = new StringBuilder(" VALUES (");
         List<Object> params = new ArrayList<>();
         for (Map.Entry<String, Object> entry : row.entrySet()) {
-            sql.append("\"").append(entry.getKey()).append("\",");
+            sql.append(SqlDialect.quoteIdent(entry.getKey(), dbType)).append(",");
             values.append("?,");
             params.add(entry.getValue());
         }
@@ -950,40 +1001,37 @@ public class FlowExecutionService {
 
     private void executeUpsert(Connection conn, String tableName, Map<String, Object> row,
             String dbType) throws SQLException {
-        // Build MERGE/UPSERT based on dbType
-        String t = dbType != null ? dbType.toLowerCase() : "";
+        String qTable = SqlDialect.quoteIdent(tableName, dbType);
+        String qId = SqlDialect.quoteIdent("id", dbType);
 
-        if (t.contains("h2")) {
-            // H2: MERGE INTO ... USING (VALUES ...) AS t ON ... WHEN MATCHED THEN UPDATE ...
-            StringBuilder merge = new StringBuilder("MERGE INTO " + tableName + " (");
+        if (SqlDialect.isH2(dbType)) {
+            StringBuilder merge = new StringBuilder("MERGE INTO " + qTable + " (");
             StringBuilder cols = new StringBuilder();
             List<Object> params = new ArrayList<>();
             for (Map.Entry<String, Object> entry : row.entrySet()) {
-                cols.append("\"").append(entry.getKey()).append("\",");
+                cols.append(SqlDialect.quoteIdent(entry.getKey(), dbType)).append(",");
                 params.add(entry.getValue());
             }
             cols.setLength(cols.length() - 1);
-            merge.append(cols).append(") KEY(id) VALUES (");
+            merge.append(cols).append(") KEY(").append(qId).append(") VALUES (");
             for (int i = 0; i < params.size(); i++) {
                 merge.append("?,");
             }
             merge.setLength(merge.length() - 1);
             merge.append(")");
-
             try (PreparedStatement ps = conn.prepareStatement(merge.toString())) {
                 for (int i = 0; i < params.size(); i++) {
                     ps.setObject(i + 1, params.get(i));
                 }
                 ps.executeUpdate();
             }
-        } else if (t.contains("mysql") || t.contains("mariadb") || t.contains("tidb") || t.contains("oceanbase")) {
-            // MySQL: INSERT ... ON DUPLICATE KEY UPDATE ...
-            StringBuilder insert = new StringBuilder("INSERT INTO " + tableName + " (");
+        } else if (SqlDialect.isMysqlFamily(dbType)) {
+            StringBuilder insert = new StringBuilder("INSERT INTO " + qTable + " (");
             StringBuilder values = new StringBuilder(") VALUES (");
             StringBuilder update = new StringBuilder(") ON DUPLICATE KEY UPDATE ");
             List<Object> params = new ArrayList<>();
             for (Map.Entry<String, Object> entry : row.entrySet()) {
-                String col = "\"" + entry.getKey() + "\"";
+                String col = SqlDialect.quoteIdent(entry.getKey(), dbType);
                 insert.append(col).append(",");
                 values.append("?,");
                 if (!"id".equalsIgnoreCase(entry.getKey())) {
@@ -995,21 +1043,19 @@ public class FlowExecutionService {
             values.setLength(values.length() - 1);
             update.setLength(update.length() - 1);
             String sql = insert.toString() + values + update.toString();
-
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
                 for (int i = 0; i < params.size(); i++) {
                     ps.setObject(i + 1, params.get(i));
                 }
                 ps.executeUpdate();
             }
-        } else if (t.contains("postgre") || t.contains("greenplum")) {
-            // PostgreSQL: INSERT ... ON CONFLICT (id) DO UPDATE SET ...
-            StringBuilder insert = new StringBuilder("INSERT INTO " + tableName + " (");
+        } else if (SqlDialect.isPostgresFamily(dbType)) {
+            StringBuilder insert = new StringBuilder("INSERT INTO " + qTable + " (");
             StringBuilder values = new StringBuilder(") VALUES (");
-            StringBuilder update = new StringBuilder(") ON CONFLICT (\"id\") DO UPDATE SET ");
+            StringBuilder update = new StringBuilder(") ON CONFLICT (").append(qId).append(") DO UPDATE SET ");
             List<Object> params = new ArrayList<>();
             for (Map.Entry<String, Object> entry : row.entrySet()) {
-                String col = "\"" + entry.getKey() + "\"";
+                String col = SqlDialect.quoteIdent(entry.getKey(), dbType);
                 insert.append(col).append(",");
                 values.append("?,");
                 if (!"id".equalsIgnoreCase(entry.getKey())) {
@@ -1021,7 +1067,6 @@ public class FlowExecutionService {
             values.setLength(values.length() - 1);
             update.setLength(update.length() - 1);
             String sql = insert.toString() + values + update.toString();
-
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
                 for (int i = 0; i < params.size(); i++) {
                     ps.setObject(i + 1, params.get(i));
@@ -1029,30 +1074,26 @@ public class FlowExecutionService {
                 ps.executeUpdate();
             }
         } else {
-            // Generic fallback: try INSERT, if duplicate key, do UPDATE
             try {
-                executeInsert(conn, tableName, row);
+                executeInsert(conn, tableName, row, dbType);
             } catch (SQLException e) {
-                // Build UPDATE: UPDATE table SET col=?,... WHERE id=?
-                StringBuilder update = new StringBuilder("UPDATE " + tableName + " SET ");
+                StringBuilder update = new StringBuilder("UPDATE " + qTable + " SET ");
                 List<Object> params = new ArrayList<>();
                 Object idVal = null;
                 for (Map.Entry<String, Object> entry : row.entrySet()) {
                     if ("id".equalsIgnoreCase(entry.getKey())) {
                         idVal = entry.getValue();
                     } else {
-                        update.append("\"").append(entry.getKey()).append("\"=?,");
+                        update.append(SqlDialect.quoteIdent(entry.getKey(), dbType)).append("=?,");
                         params.add(entry.getValue());
                     }
                 }
                 if (idVal == null) {
-                    // No id column, re-throw
                     throw e;
                 }
                 update.setLength(update.length() - 1);
-                update.append(" WHERE \"id\"=?");
+                update.append(" WHERE ").append(qId).append("=?");
                 params.add(idVal);
-
                 try (PreparedStatement ps = conn.prepareStatement(update.toString())) {
                     for (int i = 0; i < params.size(); i++) {
                         ps.setObject(i + 1, params.get(i));
@@ -1063,67 +1104,19 @@ public class FlowExecutionService {
         }
     }
 
-    /**
-     * 根据数据库类型生成适配的建表DDL，确保id自增列语法正确。
-     */
     private String buildCreateTableDDL(String tableName, Map<String, Object> firstRow, String dbType) {
-        StringBuilder ddl = new StringBuilder("CREATE TABLE " + tableName + " (");
-        ddl.append(getIdColumnDDL(dbType));
+        StringBuilder ddl = new StringBuilder("CREATE TABLE " + SqlDialect.quoteIdent(tableName, dbType) + " (");
+        ddl.append(SqlDialect.idColumnDdl(dbType));
         for (Map.Entry<String, Object> entry : firstRow.entrySet()) {
-            ddl.append(", \"").append(entry.getKey()).append("\" ");
-            Object val = entry.getValue();
-            if (val instanceof Number) {
-                if (val instanceof Integer || val instanceof Long || val instanceof Short || val instanceof Byte) {
-                    ddl.append("BIGINT");
-                } else {
-                    ddl.append("DOUBLE");
-                }
-            } else {
-                ddl.append("VARCHAR(2000)");
+            if ("id".equalsIgnoreCase(entry.getKey())) {
+                continue;
             }
+            ddl.append(", ").append(SqlDialect.quoteIdent(entry.getKey(), dbType)).append(" ");
+            ddl.append(SqlDialect.columnType(entry.getValue(), false, dbType));
         }
         ddl.append(")");
+        ddl.append(SqlDialect.createTableSuffix(dbType));
         return ddl.toString();
-    }
-
-    /**
-     * 获取不同数据库的自增主键DDL片段。
-     */
-    private String getIdColumnDDL(String dbType) {
-        if (dbType == null) return "id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY";
-        String t = dbType.toLowerCase();
-        if (t.contains("mysql") || t.contains("mariadb") || t.contains("tidb") || t.contains("oceanbase")) {
-            return "id BIGINT AUTO_INCREMENT PRIMARY KEY";
-        }
-        if (t.contains("postgre") || t.contains("greenplum")) {
-            return "id BIGSERIAL PRIMARY KEY";
-        }
-        if (t.contains("sql server") || t.contains("sqlserver")) {
-            return "id BIGINT IDENTITY(1,1) PRIMARY KEY";
-        }
-        if (t.contains("oracle")) {
-            return "id NUMBER(19) GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY";
-        }
-        if (t.contains("db2")) {
-            return "id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY";
-        }
-        if (t.contains("sqlite")) {
-            return "id INTEGER PRIMARY KEY AUTOINCREMENT";
-        }
-        if (t.contains("h2")) {
-            return "id BIGINT AUTO_INCREMENT PRIMARY KEY";
-        }
-        if (t.contains("derby")) {
-            return "id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY";
-        }
-        if (t.contains("hsqldb")) {
-            return "id BIGINT IDENTITY PRIMARY KEY";
-        }
-        if (t.contains("clickhouse")) {
-            return "id UUID DEFAULT generateUUIDv4()";
-        }
-        // 兜底使用SQL标准语法
-        return "id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY";
     }
 
     private boolean tableExists(Connection conn, String tableName) {

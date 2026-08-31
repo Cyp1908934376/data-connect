@@ -36,6 +36,12 @@ public class DsConfig {
     @Column(name = "table_name", length = 200)
     private String tableName;
 
+    @Column(name = "table_names", length = 2000)
+    private String tableNames;  // 多表名，逗号分隔
+
+    @Column(name = "custom_query_sql", columnDefinition = "TEXT")
+    private String customQuerySql;  // 自定义查询SQL
+
     @Column(name = "username", length = 200)
     private String username;
 
@@ -127,6 +133,9 @@ public class DsConfig {
         updateTime = LocalDateTime.now();
         if (enabled == null) enabled = 1;
         if (sslEnabled == null) sslEnabled = 0;
+        if (apiTimeout == null) apiTimeout = 180;
+        if (apiRetryTimes == null) apiRetryTimes = 3;
+        if (apiRetryInterval == null) apiRetryInterval = 1000;
     }
 
     @PreUpdate
@@ -153,6 +162,10 @@ public class DsConfig {
     public void setDbName(String dbName) { this.dbName = dbName; }
     public String getTableName() { return tableName; }
     public void setTableName(String tableName) { this.tableName = tableName; }
+    public String getTableNames() { return tableNames; }
+    public void setTableNames(String tableNames) { this.tableNames = tableNames; }
+    public String getCustomQuerySql() { return customQuerySql; }
+    public void setCustomQuerySql(String customQuerySql) { this.customQuerySql = customQuerySql; }
     public String getUsername() { return username; }
     public void setUsername(String username) { this.username = username; }
     public String getPassword() { return password; }

@@ -17,7 +17,10 @@ import java.io.*;
 import java.net.URL;
 import java.net.URLConnection;
 import java.net.URLEncoder;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.security.KeyFactory;
 import java.security.MessageDigest;
 import java.security.PublicKey;
@@ -27,6 +30,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.zip.CRC32;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 import javax.crypto.Cipher;
@@ -40,6 +44,8 @@ public class ThesisArchiveService {
 
     private static final Logger log = LoggerFactory.getLogger(ThesisArchiveService.class);
     private static final ObjectMapper objectMapper = new ObjectMapper();
+    /** 档案系统按此文件名检测封装包，必须用 Unicode 转义以免编译编码把字面量写坏 */
+    private static final String METADATA_XML_NAME = "\u5143\u6570\u636e.xml";
 
     private final OkHttpClient httpClient = new OkHttpClient.Builder()
             .connectTimeout(60, TimeUnit.SECONDS)
@@ -62,13 +68,34 @@ public class ThesisArchiveService {
      * @return 推送结果 Map（含 success, msg 等）
      */
     public Map<String, Object> execute(Map<String, Object> row, DsConfig outputDs) {
+        Map<String, String> archiveConfig = parseArchiveConfig(outputDs);
+        String apiUrl = outputDs != null ? outputDs.getApiUrl() : null;
+        String xmlFieldConfig = outputDs != null ? outputDs.getApiBody() : null;
+        return execute(row, apiUrl, archiveConfig, xmlFieldConfig);
+    }
+
+    /**
+     * 可视化模板入参驱动：不依赖 ds_config，元数据 XML 按映射后的行字段生成。
+     */
+    public Map<String, Object> execute(Map<String, Object> row, String apiUrl, Map<String, String> archiveConfig) {
+        return execute(row, apiUrl, archiveConfig, null, true);
+    }
+
+    public Map<String, Object> execute(Map<String, Object> row, String apiUrl,
+            Map<String, String> archiveConfig, String xmlFieldConfig) {
+        return execute(row, apiUrl, archiveConfig, xmlFieldConfig, false);
+    }
+
+    public Map<String, Object> execute(Map<String, Object> row, String apiUrl,
+            Map<String, String> archiveConfig, String xmlFieldConfig, boolean fromMapping) {
         Map<String, Object> result = new LinkedHashMap<>();
         File tempDir = null;
         File zipFile = null;
+        if (archiveConfig == null) {
+            archiveConfig = new LinkedHashMap<>();
+        }
 
         try {
-            // 1. 解析配置
-            Map<String, String> archiveConfig = parseArchiveConfig(outputDs);
             String ccode = archiveConfig.getOrDefault("ccode", "lwdj");
             String fileIdentifierCode = getFileIdentifierCode(row, archiveConfig);
 
@@ -78,7 +105,6 @@ public class ThesisArchiveService {
                 return result;
             }
 
-            // 2. 获取 PDF 文件列表
             List<FileInfo> pdfFiles = resolvePdfFiles(row, archiveConfig);
             if (pdfFiles.isEmpty()) {
                 result.put("success", false);
@@ -86,39 +112,55 @@ public class ThesisArchiveService {
                 return result;
             }
 
-            // 3. 计算各 PDF 的 MD5
             for (FileInfo fi : pdfFiles) {
                 fi.md5 = computeMd5(fi.data);
                 fi.size = fi.data.length;
             }
 
-            // 4. 生成元数据.xml
-            String metadataXml = generateMetadataXml(row, pdfFiles, outputDs.getApiBody());
-
-            // 5. 创建临时目录并打包 ZIP
-            tempDir = createTempDir();
-            // 写入元数据.xml
-            writeFile(new File(tempDir, "元数据.xml"), metadataXml.getBytes(StandardCharsets.UTF_8));
-            // 写入 PDF 文件
-            for (FileInfo fi : pdfFiles) {
-                writeFile(new File(tempDir, fi.fileName), fi.data);
+            String metadataXml = generateMetadataXml(row, pdfFiles, xmlFieldConfig, fromMapping);
+            if (metadataXml == null || metadataXml.trim().isEmpty()) {
+                result.put("success", false);
+                result.put("error", "元数据.xml 生成为空");
+                return result;
             }
 
-            // 6. 打包为 ZIP
+            tempDir = createTempDir();
+            writeFile(new File(tempDir, METADATA_XML_NAME), metadataXml.getBytes(StandardCharsets.UTF_8));
+            for (FileInfo fi : pdfFiles) {
+                String pdfName = sanitizeZipFileName(fi.fileName);
+                fi.fileName = pdfName;
+                writeFile(new File(tempDir, pdfName), fi.data);
+            }
+
             zipFile = File.createTempFile("archive_", ".zip");
             zipDirectory(tempDir, zipFile);
+            int xmlBytes = metadataXml.getBytes(StandardCharsets.UTF_8).length;
+            long zipBytes = zipFile.length();
+            log.info("已生成元数据.xml, 标识={}, xmlBytes={}, zipBytes={}, 包内文件={}",
+                    fileIdentifierCode,
+                    xmlBytes,
+                    zipBytes,
+                    listTempNames(tempDir));
+            saveArchiveDebugCopy(fileIdentifierCode, metadataXml, zipFile);
 
-            // 7. 获取 archive token
-            String archiveToken = getArchiveToken(outputDs.getApiUrl(), archiveConfig);
-            // 8. 推送到档案系统
-            result = uploadToArchives(outputDs.getApiUrl(), ccode, fileIdentifierCode, zipFile, archiveToken);
+            String archiveToken = getArchiveToken(apiUrl, archiveConfig);
+            boolean tokenOk = archiveToken != null && !archiveToken.isEmpty();
+            if (!tokenOk) {
+                log.warn("未获取到档案 token, fileIdentifierCode={}", fileIdentifierCode);
+            }
+            Map<String, Object> uploadResult = uploadToArchives(apiUrl, ccode, fileIdentifierCode, zipFile, archiveToken);
+            result.putAll(uploadResult);
+            result.put("fileIdentifierCode", fileIdentifierCode);
+            result.put("pdfCount", pdfFiles.size());
+            result.put("xmlBytes", xmlBytes);
+            result.put("zipBytes", zipBytes);
+            result.put("tokenObtained", tokenOk);
 
         } catch (Exception e) {
             log.error("论文归档失败: {}", e.getMessage(), e);
             result.put("success", false);
             result.put("error", "归档异常: " + e.getMessage());
         } finally {
-            // 清理临时文件
             deleteQuietly(zipFile);
             deleteDirQuietly(tempDir);
         }
@@ -128,13 +170,26 @@ public class ThesisArchiveService {
 
     // ==================== 元数据 XML 生成 ====================
 
+    /** 可视化映射行里不应写入 XML 的内部/凭证字段 */
+    private static final Set<String> MAPPING_XML_SKIP = new LinkedHashSet<>(Arrays.asList(
+            "pdfFiles", "documents", "pdf_url", "pdf_fileName", "pdf_localPath", "pdf_count",
+            "apiUrl", "appkey", "password", "ccode", "archiveUrl",
+            "xh", "XHS", "downloadUrl",
+            "软件环境", "硬件环境"
+    ));
+
     /**
      * 根据论文数据行和文件列表生成 电子档案元数据 XML 字符串。
      * xmlFieldConfig 为 ds_config.api_body 中的 JSON 数组，定义 XML 字段映射。
-     * 若未配置则回退到内置默认逻辑。
+     * fromMapping=true 时按可视化映射后的行字段生成，不套用宁波诺丁汉默认模板。
      */
     public String generateMetadataXml(Map<String, Object> row, List<FileInfo> pdfFiles,
             String xmlFieldConfig) throws Exception {
+        return generateMetadataXml(row, pdfFiles, xmlFieldConfig, false);
+    }
+
+    public String generateMetadataXml(Map<String, Object> row, List<FileInfo> pdfFiles,
+            String xmlFieldConfig, boolean fromMapping) throws Exception {
         org.w3c.dom.Document doc = DocumentBuilderFactory.newInstance()
                 .newDocumentBuilder().newDocument();
         doc.setXmlStandalone(true);
@@ -177,8 +232,10 @@ public class ThesisArchiveService {
                 String value = resolveFieldValue(row, ctx, source, defVal);
                 addElement(doc, root, tag, value);
             }
+        } else if (fromMapping) {
+            renderMappedFields(doc, root, row);
         } else {
-            // ---- 内置默认逻辑（向后兼容） ----
+            // ---- 内置默认逻辑（旧流程 407/408 向后兼容） ----
             renderDefaultFields(doc, root, row, pdfFiles, ctx);
         }
 
@@ -245,6 +302,110 @@ public class ThesisArchiveService {
             }
         }
         return result;
+    }
+
+    /**
+     * 可视化模板：映射目标字段名即 XML 标签，值为映射结果。
+     * 目标名带 / 时生成嵌套节点，例如 档号/全宗号 → &lt;档号&gt;&lt;全宗号&gt;...&lt;/全宗号&gt;&lt;/档号&gt;。
+     * 不补宁波诺丁汉默认值；内部字段、凭证、附件二进制不写入。
+     */
+    @SuppressWarnings("unchecked")
+    private void renderMappedFields(org.w3c.dom.Document doc, org.w3c.dom.Element root,
+            Map<String, Object> row) {
+        if (row == null || row.isEmpty()) {
+            return;
+        }
+        Map<String, Object> tree = new LinkedHashMap<>();
+        Set<String> mappedTags = mappedXmlTags(row);
+        for (Map.Entry<String, Object> e : row.entrySet()) {
+            String tag = e.getKey();
+            if (tag == null || tag.isEmpty()) continue;
+            if (tag.startsWith("_")) continue;
+            if (MAPPING_XML_SKIP.contains(tag)) continue;
+            if (mappedTags != null && !mappedTags.contains(tag) && !"案卷号".equals(tag)) continue;
+            Object val = e.getValue();
+            if (val instanceof byte[] || val instanceof Map || val instanceof Collection) {
+                continue;
+            }
+            String[] parts = tag.split("/");
+            boolean valid = true;
+            for (String part : parts) {
+                if (!isValidXmlName(part.trim())) {
+                    valid = false;
+                    break;
+                }
+            }
+            if (!valid) continue;
+            putXmlPath(tree, parts, val);
+        }
+        renderXmlTree(doc, root, tree);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Set<String> mappedXmlTags(Map<String, Object> row) {
+        Object raw = row.get("_mappingDstFields");
+        if (!(raw instanceof Collection)) {
+            return null;
+        }
+        Set<String> tags = new LinkedHashSet<>();
+        for (Object item : (Collection<?>) raw) {
+            if (item != null && !item.toString().trim().isEmpty()) {
+                tags.add(item.toString().trim());
+            }
+        }
+        return tags.isEmpty() ? null : tags;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void putXmlPath(Map<String, Object> tree, String[] parts, Object val) {
+        Map<String, Object> cur = tree;
+        for (int i = 0; i < parts.length - 1; i++) {
+            String name = parts[i].trim();
+            Object child = cur.get(name);
+            if (!(child instanceof Map)) {
+                Map<String, Object> next = new LinkedHashMap<>();
+                cur.put(name, next);
+                cur = next;
+            } else {
+                cur = (Map<String, Object>) child;
+            }
+        }
+        String leaf = parts[parts.length - 1].trim();
+        if (cur.get(leaf) instanceof Map) {
+            return;
+        }
+        cur.put(leaf, val);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void renderXmlTree(org.w3c.dom.Document doc, org.w3c.dom.Element parent,
+            Map<String, Object> tree) {
+        for (Map.Entry<String, Object> e : tree.entrySet()) {
+            Object val = e.getValue();
+            if (val instanceof Map) {
+                org.w3c.dom.Element el = doc.createElement(e.getKey());
+                parent.appendChild(el);
+                renderXmlTree(doc, el, (Map<String, Object>) val);
+            } else {
+                addElement(doc, parent, e.getKey(), val != null ? val.toString() : "");
+            }
+        }
+    }
+
+    private boolean isValidXmlName(String name) {
+        if (name == null || name.isEmpty()) return false;
+        char first = name.charAt(0);
+        if (!Character.isLetter(first) && first != '_' && first != ':') {
+            return false;
+        }
+        for (int i = 1; i < name.length(); i++) {
+            char ch = name.charAt(i);
+            if (Character.isLetterOrDigit(ch) || ch == '_' || ch == '-' || ch == '.' || ch == ':') {
+                continue;
+            }
+            return false;
+        }
+        return true;
     }
 
     // ---- 内置默认逻辑（向后兼容，不可更改的模板） ----
@@ -369,39 +530,126 @@ public class ThesisArchiveService {
     // ==================== ZIP 打包 ====================
 
     public void zipDirectory(File sourceDir, File destZip) throws Exception {
+        File[] files = sourceDir.listFiles();
+        if (files == null) {
+            files = new File[0];
+        }
+        Arrays.sort(files, (a, b) -> {
+            boolean am = METADATA_XML_NAME.equals(a.getName());
+            boolean bm = METADATA_XML_NAME.equals(b.getName());
+            if (am && !bm) return -1;
+            if (!am && bm) return 1;
+            return a.getName().compareTo(b.getName());
+        });
+        // 条目名用 GBK 原始字节写入（不打 UTF-8 语言编码位）。
+        // 档案系统常按 GBK 扫描「元数据.xml」，UTF-8 条目会被判定为未检测到。
         try (FileOutputStream fos = new FileOutputStream(destZip);
-             ZipOutputStream zos = new ZipOutputStream(fos, StandardCharsets.UTF_8)) {
-            File[] files = sourceDir.listFiles();
-            if (files != null) {
-                for (File file : files) {
-                    addToZip(file, "", zos);
+             ZipOutputStream zos = new ZipOutputStream(fos, StandardCharsets.ISO_8859_1)) {
+            for (File file : files) {
+                if (file.isFile()) {
+                    addFileToZip(file, zos);
                 }
             }
         }
     }
 
-    private void addToZip(File file, String parentPath, ZipOutputStream zos) throws Exception {
-        String entryName = parentPath.isEmpty() ? file.getName() : parentPath + "/" + file.getName();
-        if (file.isDirectory()) {
-            zos.putNextEntry(new ZipEntry(entryName + "/"));
-            zos.closeEntry();
-            File[] children = file.listFiles();
-            if (children != null) {
-                for (File child : children) {
-                    addToZip(child, entryName, zos);
-                }
-            }
-        } else {
-            zos.putNextEntry(new ZipEntry(entryName));
-            try (FileInputStream fis = new FileInputStream(file)) {
-                byte[] buf = new byte[8192];
-                int n;
-                while ((n = fis.read(buf)) != -1) {
-                    zos.write(buf, 0, n);
-                }
-            }
-            zos.closeEntry();
+    private Charset gbkCharset() {
+        try {
+            return Charset.forName("GBK");
+        } catch (Exception e) {
+            return Charset.forName("GB18030");
         }
+    }
+
+    /** 把 Unicode 文件名转成 ZIP 头里的 GBK 字节（经 ISO-8859-1 透传）。 */
+    private String toGbkZipEntryName(String unicodeName) {
+        byte[] gbk = unicodeName.getBytes(gbkCharset());
+        return new String(gbk, StandardCharsets.ISO_8859_1);
+    }
+
+    /**
+     * Info-ZIP Unicode Path Extra Field (0x7075)，方便 7-Zip / 资源管理器仍显示正确中文名。
+     */
+    private byte[] buildUnicodePathExtra(String unicodeName) {
+        byte[] headerNameBytes = unicodeName.getBytes(gbkCharset());
+        byte[] utf8Name = unicodeName.getBytes(StandardCharsets.UTF_8);
+        CRC32 crc = new CRC32();
+        crc.update(headerNameBytes);
+        long crcVal = crc.getValue();
+        int dataSize = 1 + 4 + utf8Name.length;
+        byte[] extra = new byte[4 + dataSize];
+        extra[0] = 0x75;
+        extra[1] = 0x70;
+        extra[2] = (byte) (dataSize & 0xff);
+        extra[3] = (byte) ((dataSize >> 8) & 0xff);
+        extra[4] = 1;
+        extra[5] = (byte) (crcVal & 0xff);
+        extra[6] = (byte) ((crcVal >> 8) & 0xff);
+        extra[7] = (byte) ((crcVal >> 16) & 0xff);
+        extra[8] = (byte) ((crcVal >> 24) & 0xff);
+        System.arraycopy(utf8Name, 0, extra, 9, utf8Name.length);
+        return extra;
+    }
+
+    private String listTempNames(File dir) {
+        File[] files = dir == null ? null : dir.listFiles();
+        if (files == null || files.length == 0) {
+            return "(空)";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < files.length; i++) {
+            if (i > 0) sb.append(", ");
+            sb.append(files[i].getName());
+        }
+        return sb.toString();
+    }
+
+    private void saveArchiveDebugCopy(String fileIdentifierCode, String metadataXml, File zipFile) {
+        try {
+            File debugDir = new File("./logs/archive-debug");
+            if (!debugDir.exists() && !debugDir.mkdirs()) {
+                log.warn("无法创建归档调试目录: {}", debugDir.getAbsolutePath());
+                return;
+            }
+            String safeId = (fileIdentifierCode == null || fileIdentifierCode.isEmpty())
+                    ? "unknown" : fileIdentifierCode.replaceAll("[\\\\/:*?\"<>|]", "_");
+            writeFile(new File(debugDir, safeId + "-" + METADATA_XML_NAME),
+                    metadataXml.getBytes(StandardCharsets.UTF_8));
+            if (zipFile != null && zipFile.exists() && zipFile.length() <= 30L * 1024 * 1024) {
+                Files.copy(zipFile.toPath(), new File(debugDir, safeId + ".zip").toPath(),
+                        StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (Exception e) {
+            log.warn("保存归档调试副本失败: {}", e.getMessage());
+        }
+    }
+
+    private String sanitizeZipFileName(String fileName) {
+        if (fileName == null || fileName.trim().isEmpty()) {
+            return "attachment.pdf";
+        }
+        String name = fileName.trim().replace('\\', '/');
+        int slash = name.lastIndexOf('/');
+        if (slash >= 0) {
+            name = name.substring(slash + 1);
+        }
+        name = name.replaceAll("[\\:*?\"<>|]", "_");
+        return name.isEmpty() ? "attachment.pdf" : name;
+    }
+
+    private void addFileToZip(File file, ZipOutputStream zos) throws Exception {
+        String name = sanitizeZipFileName(file.getName());
+        ZipEntry entry = new ZipEntry(toGbkZipEntryName(name));
+        entry.setExtra(buildUnicodePathExtra(name));
+        zos.putNextEntry(entry);
+        try (FileInputStream fis = new FileInputStream(file)) {
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = fis.read(buf)) != -1) {
+                zos.write(buf, 0, n);
+            }
+        }
+        zos.closeEntry();
     }
 
     // ==================== 推送到档案系统 ====================
@@ -565,14 +813,14 @@ public class ThesisArchiveService {
         }
         List<FileInfo> files = new ArrayList<>();
 
-        // 方式1：pdfFiles JSON 数组
+        // 方式1：pdfFiles JSON 数组或内存对象（下载步骤写入的 byte[]）
         Object pdfFilesObj = row.get("pdfFiles");
         if (pdfFilesObj instanceof String && !((String) pdfFilesObj).isEmpty()) {
             try {
-                List<Map<String, String>> list = objectMapper.readValue(
+                List<Map<String, Object>> list = objectMapper.readValue(
                         (String) pdfFilesObj,
-                        new TypeReference<List<Map<String, String>>>() {});
-                for (Map<String, String> item : list) {
+                        new TypeReference<List<Map<String, Object>>>() {});
+                for (Map<String, Object> item : list) {
                     FileInfo fi = resolveFileInfo(item);
                     if (fi != null) files.add(fi);
                 }
@@ -585,7 +833,7 @@ public class ThesisArchiveService {
             for (Object item : list) {
                 if (item instanceof Map) {
                     @SuppressWarnings("unchecked")
-                    Map<String, String> map = (Map<String, String>) item;
+                    Map<String, Object> map = (Map<String, Object>) item;
                     FileInfo fi = resolveFileInfo(map);
                     if (fi != null) files.add(fi);
                 }
@@ -668,28 +916,40 @@ public class ThesisArchiveService {
         return obj != null ? obj.toString() : "";
     }
 
-    private FileInfo resolveFileInfo(Map<String, String> item) {
-        String path = item.get("path");
-        String name = item.get("name");
-        String url = item.get("url");
-        String content = item.get("content");  // base64
+    private FileInfo resolveFileInfo(Map<String, ?> item) {
+        Object dataObj = item.get("data");
+        String name = asString(item.get("name"));
+        String url = asString(item.get("url"));
+        String path = asString(item.get("path"));
+        String content = asString(item.get("content"));
+        String format = asString(item.get("format"));
+        if (format.isEmpty()) {
+            format = "pdf";
+        }
 
-        if (content != null && !content.isEmpty()) {
-            byte[] data = Base64.getDecoder().decode(content);
-            String fileName = name != null ? name : "thesis.pdf";
+        if (dataObj instanceof byte[]) {
             FileInfo fi = new FileInfo();
-            fi.fileName = fileName;
-            fi.data = data;
-            fi.format = item.getOrDefault("format", "pdf");
+            fi.fileName = name.isEmpty() ? "attachment.pdf" : name;
+            fi.data = (byte[]) dataObj;
+            fi.format = format;
             return fi;
         }
 
-        if (url != null && !url.isEmpty()) {
-            return loadFileFromUrl(url, name);
+        if (!content.isEmpty()) {
+            byte[] data = Base64.getDecoder().decode(content);
+            FileInfo fi = new FileInfo();
+            fi.fileName = name.isEmpty() ? "thesis.pdf" : name;
+            fi.data = data;
+            fi.format = format;
+            return fi;
         }
 
-        if (path != null && !path.isEmpty()) {
-            return loadFileFromPath(path, name);
+        if (!url.isEmpty()) {
+            return loadFileFromUrl(url, name.isEmpty() ? null : name);
+        }
+
+        if (!path.isEmpty()) {
+            return loadFileFromPath(path, name.isEmpty() ? null : name);
         }
 
         return null;

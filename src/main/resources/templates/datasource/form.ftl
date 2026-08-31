@@ -80,12 +80,13 @@ extraJs=["/static/codemirror/codemirror.min.js", "/static/codemirror/mode/sql.mi
                     <div class="col-md-6">
                         <label class="form-label">
                             数据表名称
-                            <small class="text-muted">(选填)</small>
+                            <small class="text-muted">(选填，支持多表逗号分隔)</small>
                         </label>
-                        <input type="text" class="form-control" name="tableName" value="${(config.tableName)!''}" placeholder="例如: user_info">
+                        <input type="text" class="form-control" name="tableNames" value="${(config.tableNames)!''}" placeholder="例如: user_info 或 user_info,order_info,product_info">
                         <small class="form-text text-muted">
-                            <i class="bi bi-info-circle"></i> 作为<strong>输入数据源</strong>时：指定读取哪张表，留空则自动取第一张表<br>
-                            <i class="bi bi-info-circle"></i> 作为<strong>输出数据源</strong>时：指定写入哪张表，留空则写入默认表 data_sync_result
+                            <i class="bi bi-info-circle"></i> 作为<strong>输入数据源</strong>时：指定读取哪些表，留空则自动取第一张表<br>
+                            <i class="bi bi-info-circle"></i> 作为<strong>输出数据源</strong>时：指定写入哪张表，留空则写入默认表 data_sync_result<br>
+                            <i class="bi bi-info-circle"></i> 多表用逗号分隔，后续使用此数据源时将只显示配置的表
                         </small>
                     </div>
                     <div class="col-md-6">
@@ -138,8 +139,23 @@ extraJs=["/static/codemirror/codemirror.min.js", "/static/codemirror/mode/sql.mi
                 <h6 class="mb-3">高级设置</h6>
                 <div class="row g-3">
                     <div class="col-12">
-                        <label class="form-label">初始化SQL <small class="text-muted">(连接池初始化时执行的SQL)</small></label>
+                        <label class="form-label">初始化SQL <small class="text-muted">(每次获取连接后执行)</small></label>
                         <textarea id="dbInitSql" name="initSql" data-cm-mode="sql">${(config.initSql)!''}</textarea>
+                        <small class="form-text text-muted">
+                            <i class="bi bi-info-circle"></i> 每次从连接池获取连接后自动执行，用于设置会话级环境参数<br>
+                            <i class="bi bi-info-circle"></i> 常用场景：SET time_zone = '+08:00'、SET NAMES utf8mb4、USE database_name
+                        </small>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">
+                            自定义查询SQL
+                            <small class="text-muted">(选填，用于进一步规范查询范围)</small>
+                        </label>
+                        <textarea id="dbCustomQuerySql" name="customQuerySql" data-cm-mode="sql">${(config.customQuerySql)!''}</textarea>
+                        <small class="form-text text-muted">
+                            <i class="bi bi-info-circle"></i> 配置自定义SQL后，将优先使用此SQL进行数据查询，而不是默认的 SELECT * FROM table<br>
+                            <i class="bi bi-info-circle"></i> 可用于添加 WHERE 条件、JOIN 关联、字段筛选等，例如: SELECT id, name FROM user_info WHERE status = 1
+                        </small>
                     </div>
                 </div>
             </div>
@@ -172,7 +188,9 @@ extraJs=["/static/codemirror/codemirror.min.js", "/static/codemirror/mode/sql.mi
                         <select class="form-select" id="apiMode" name="apiMode" style="max-width:400px;">
                             <option value="SINGLE" <#if ((config.apiMode)!'SINGLE') == 'SINGLE'>selected</#if>>单接口 (SINGLE) - 直接调用单个API</option>
                             <option value="CHAIN" <#if ((config.apiMode)!'') == 'CHAIN'>selected</#if>>多接口链 (CHAIN) - 多步API流水线调用</option>
-                            <option value="SCRIPT" <#if ((config.apiMode)!'') == 'SCRIPT'>selected</#if>>复杂脚本 (SCRIPT) - Groovy模板编排</option>
+                            <#if ((config.apiMode)!'') == 'SCRIPT'>
+                            <option value="SCRIPT" selected>复杂脚本 (SCRIPT) - 旧版，建议改用可视化模板</option>
+                            </#if>
                         </select>
                     </div>
                 </div>
@@ -188,11 +206,11 @@ extraJs=["/static/codemirror/codemirror.min.js", "/static/codemirror/mode/sql.mi
                     <div class="row g-3">
                         <div class="col-md-4">
                             <label class="form-label">超时时间(秒)</label>
-                            <input type="number" class="form-control" id="apiTimeout" name="apiTimeout" value="${(config.apiTimeout)!30}" min="1" max="300">
+                            <input type="number" class="form-control" id="apiTimeout" name="apiTimeout" value="${(config.apiTimeout)!180}" min="1" max="600">
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">重试次数</label>
-                            <input type="number" class="form-control" id="apiRetryTimes" name="apiRetryTimes" value="${(config.apiRetryTimes)!0}" min="0" max="10">
+                            <input type="number" class="form-control" id="apiRetryTimes" name="apiRetryTimes" value="${(config.apiRetryTimes)!3}" min="0" max="10">
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">重试间隔(毫秒)</label>
@@ -257,27 +275,21 @@ extraJs=["/static/codemirror/codemirror.min.js", "/static/codemirror/mode/sql.mi
                     </div>
                 </div>
 
-                <!-- SCRIPT 模式配置 -->
-                <div class="api-mode-section" id="scriptSection" style="display:none;">
+                <!-- SCRIPT 模式配置（仅旧数据源仍使用时显示） -->
+                <#if ((config.apiMode)!'') == 'SCRIPT'>
+                <div class="api-mode-section" id="scriptSection">
                     <h6 class="mb-3 mt-2">
                         <i class="bi bi-code-slash"></i> 复杂脚本配置
-                        <button type="button" class="btn btn-sm btn-outline-warning ms-2" onclick="loadScriptExample()">
-                            <i class="bi bi-lightbulb"></i> 加载示例
-                        </button>
+                        <span class="badge bg-secondary">旧版</span>
                     </h6>
+                    <div class="alert alert-warning py-2 small">Groovy 脚本模式已不再作为新配置入口，请改用可视化模板。此处仅保留已有数据源的编辑。</div>
                     <div class="row g-3">
                         <div class="col-md-6">
-                            <label class="form-label">选择模板 <span class="text-danger">*</span></label>
-                            <select class="form-select" id="templateId" name="templateId">
-                                <option value="0">请选择模板...</option>
-                                <#list templates as t>
-                                    <option value="${t.id}" <#if ((config.templateId)!0) == t.id>selected</#if>>${t.name} <#if t.type??>(<small>${t.type}</small>)</#if></option>
-                                </#list>
-                            </select>
-                            <small class="text-muted">使用模板管理中的Groovy脚本进行复杂编排，脚本中可用 http、config、params 变量</small>
+                            <label class="form-label">关联模板 ID</label>
+                            <input type="number" class="form-control" id="templateId" name="templateId" value="${(config.templateId)!0}">
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label">认证方式 <small class="text-muted">(脚本中通过config使用)</small></label>
+                            <label class="form-label">认证方式</label>
                             <select class="form-select" id="scriptAuthType">
                                 <option value="NONE" <#if ((config.apiAuthType)!'NONE') == 'NONE'>selected</#if>>无认证</option>
                                 <option value="BASIC" <#if ((config.apiAuthType)!'') == 'BASIC'>selected</#if>>Basic Auth</option>
@@ -291,6 +303,9 @@ extraJs=["/static/codemirror/codemirror.min.js", "/static/codemirror/mode/sql.mi
                         </div>
                     </div>
                 </div>
+                <#else>
+                <input type="hidden" name="templateId" value="${(config.templateId)!0}">
+                </#if>
 
             </div>
         </div>
@@ -411,7 +426,7 @@ function loadSingleExample() {
     $('input[name="description"]').val('获取单条文章数据');
     $('#apiUrl').val('https://jsonplaceholder.typicode.com/posts/1');
     $('#apiMethod').val('GET');
-    $('#apiTimeout').val('30');
+    $('#apiTimeout').val('180');
     $('#apiAuthType').val('NONE');
     if (cmInstances['apiAuthConfig']) cmInstances['apiAuthConfig'].setValue('');
     if (cmInstances['apiHeaders']) cmInstances['apiHeaders'].setValue('{\n  "Accept": "application/json"\n}');
@@ -424,7 +439,7 @@ function loadChainExample() {
     $('input[name="description"]').val('先登录获取Token，再调用数据接口');
     $('#apiUrl').val('https://api.example.com');
     $('#apiMethod').val('GET');
-    $('#apiTimeout').val('30');
+    $('#apiTimeout').val('180');
     $('#chainAuthType').val('NONE');
 
     var chainJson = [
@@ -460,17 +475,6 @@ function loadChainExample() {
     showInfo('已加载多接口链示例：<br>1. POST 登录获取 token<br>2. GET 查询订单列表<br>3. GET 获取每个订单详情<br><br>变量 ${"$"}{token}、${"$"}{userId} 自动从响应中提取并在后续步骤使用', { duration: 6000, title: '加载示例' });
 }
 
-function loadScriptExample() {
-    $('input[name="name"]').val('Groovy脚本编排示例');
-    $('input[name="description"]').val('查询清单→逐条查详情→条件过滤→结果聚合');
-    $('#apiUrl').val('https://api.example.com');
-    $('#apiMethod').val('GET');
-    $('#apiTimeout').val('30');
-    $('#scriptAuthType').val('NONE');
-    if (cmInstances['scriptAuthConfig']) cmInstances['scriptAuthConfig'].setValue('');
-    showInfo('此模式需要在"模板管理"中创建Groovy模板，模板中可使用：<br>- http.get(url, headers) / http.post(url, body, headers)<br>- config: 当前数据源配置<br>- params: 传入的额外参数<br>- out: 输出Map<br><br>示例模板脚本见模板管理的编辑器。', { duration: 6000, title: '已加载脚本模式示例配置' });
-}
-
 // 页面初始化
 $(function() {
     // 显示服务端返回的 flash 消息为通知
@@ -483,6 +487,7 @@ $(function() {
 
     // 初始化可见的 CodeMirror 编辑器（隐藏区域的不初始化，等显示时再初始化）
     initCodeMirror('dbInitSql', 'sql');
+    initCodeMirror('dbCustomQuerySql', 'sql');
     // SINGLE 区域默认可见时初始化
     if (getApiMode() === 'SINGLE') {
         initCodeMirror('apiAuthConfig', 'javascript');

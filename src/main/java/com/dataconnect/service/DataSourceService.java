@@ -2,6 +2,8 @@ package com.dataconnect.service;
 
 import com.dataconnect.entity.DsConfig;
 import com.dataconnect.repository.DsConfigRepository;
+import com.dataconnect.util.SqlDialect;
+import com.dataconnect.util.SqlPageWrapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -61,6 +63,8 @@ public class DataSourceService {
             existing.setPort(updated.getPort());
             existing.setDbName(updated.getDbName());
             existing.setTableName(updated.getTableName());
+            existing.setTableNames(updated.getTableNames());
+            existing.setCustomQuerySql(updated.getCustomQuerySql());
             existing.setUsername(updated.getUsername());
             if (updated.getPassword() != null && !updated.getPassword().isEmpty()) {
                 existing.setPassword(updated.getPassword());
@@ -115,7 +119,15 @@ public class DataSourceService {
         return dynamicDsManager.testConnection(config);
     }
 
+    public Map<String, Object> testConnectionWithMessage(DsConfig config) {
+        return dynamicDsManager.testConnectionWithMessage(config);
+    }
+
     public Map<String, Object> executeQuery(Long dsId, String sql) {
+        return executeQuery(dsId, sql, 0);
+    }
+
+    public Map<String, Object> executeQuery(Long dsId, String sql, int maxRows) {
         Map<String, Object> result = new LinkedHashMap<>();
         long start = System.currentTimeMillis();
         DsConfig config = dsConfigRepository.findById(dsId).orElse(null);
@@ -134,6 +146,9 @@ public class DataSourceService {
         }
         try (Connection conn = ds.getConnection();
              Statement stmt = conn.createStatement()) {
+            if (maxRows > 0) {
+                stmt.setMaxRows(maxRows);
+            }
             String upperSql = sql.trim().toUpperCase();
             if (upperSql.startsWith("SELECT") || upperSql.startsWith("SHOW")
                     || upperSql.startsWith("DESCRIBE") || upperSql.startsWith("DESC")
@@ -141,14 +156,22 @@ public class DataSourceService {
                 try (ResultSet rs = stmt.executeQuery(sql)) {
                     List<Map<String, Object>> rows = new ArrayList<>();
                     ResultSetMetaData meta = rs.getMetaData();
+                    int columnCount = meta.getColumnCount();
                     List<String> columns = new ArrayList<>();
-                    for (int i = 1; i <= meta.getColumnCount(); i++) {
-                        columns.add(meta.getColumnName(i));
+                    for (int i = 1; i <= columnCount; i++) {
+                        String label = meta.getColumnLabel(i);
+                        if (label == null || label.isEmpty()) {
+                            label = meta.getColumnName(i);
+                        }
+                        columns.add(label);
                     }
                     while (rs.next()) {
+                        if (maxRows > 0 && rows.size() >= maxRows) {
+                            break;
+                        }
                         Map<String, Object> row = new LinkedHashMap<>();
-                        for (String col : columns) {
-                            row.put(col, rs.getObject(col));
+                        for (int i = 1; i <= columnCount; i++) {
+                            row.put(columns.get(i - 1), rs.getObject(i));
                         }
                         rows.add(row);
                     }
@@ -189,10 +212,38 @@ public class DataSourceService {
         try (Connection conn = ds.getConnection()) {
             DatabaseMetaData meta = conn.getMetaData();
             List<Map<String, Object>> tables = new ArrayList<>();
-            try (ResultSet rs = meta.getTables(config.getDbName(), null, "%", new String[]{"TABLE", "VIEW"})) {
+
+            // 解析配置的多表名
+            Set<String> configuredTables = parseTableNames(config);
+            boolean hasFilter = !configuredTables.isEmpty();
+
+            String dbType = config.getDbType() != null ? config.getDbType().toUpperCase() : "";
+            String catalog = null;
+            String schemaPattern = null;
+
+            if (dbType.contains("ORACLE")) {
+                // Oracle: catalog=null, schema=用户名大写
+                catalog = null;
+                schemaPattern = config.getUsername() != null ? config.getUsername().toUpperCase() : null;
+            } else if (dbType.contains("POSTGRESQL") || dbType.contains("PG")) {
+                catalog = null;
+                schemaPattern = "public";
+            } else if (dbType.contains("SQLSERVER") || dbType.contains("MSSQL")) {
+                catalog = config.getDbName();
+                schemaPattern = "dbo";
+            } else {
+                catalog = config.getDbName();
+            }
+
+            try (ResultSet rs = meta.getTables(catalog, schemaPattern, "%", new String[]{"TABLE", "VIEW"})) {
                 while (rs.next()) {
+                    String tableName = rs.getString("TABLE_NAME");
+                    // 如果配置了多表名，则只返回配置中的表
+                    if (hasFilter && !configuredTables.contains(tableName.toUpperCase())) {
+                        continue;
+                    }
                     Map<String, Object> table = new LinkedHashMap<>();
-                    table.put("name", rs.getString("TABLE_NAME"));
+                    table.put("name", tableName);
                     table.put("type", rs.getString("TABLE_TYPE"));
                     table.put("remarks", rs.getString("REMARKS"));
                     tables.add(table);
@@ -204,6 +255,30 @@ public class DataSourceService {
             log.error("获取表列表失败, dsId={}", dsId, e);
             result.put("success", false);
             result.put("error", e.getMessage());
+        }
+        return result;
+    }
+
+    /**
+     * 解析多表名配置（逗号分隔）
+     * 同时支持 tableName 和 tableNames 字段，合并去重
+     */
+    private Set<String> parseTableNames(DsConfig config) {
+        Set<String> result = new HashSet<>();
+        // 兼容旧的 tableName 字段
+        String tableName = config.getTableName();
+        if (tableName != null && !tableName.trim().isEmpty()) {
+            result.add(tableName.trim().toUpperCase());
+        }
+        // 新的 tableNames 字段（支持中英文逗号、换行分隔）
+        String tableNames = config.getTableNames();
+        if (tableNames != null && !tableNames.trim().isEmpty()) {
+            for (String name : tableNames.replace("，", ",").replace("\n", ",").split(",")) {
+                String trimmed = name.trim();
+                if (!trimmed.isEmpty()) {
+                    result.add(trimmed.toUpperCase());
+                }
+            }
         }
         return result;
     }
@@ -227,7 +302,22 @@ public class DataSourceService {
         try (Connection conn = ds.getConnection()) {
             DatabaseMetaData meta = conn.getMetaData();
             List<Map<String, Object>> columns = new ArrayList<>();
-            try (ResultSet rs = meta.getColumns(config.getDbName(), null, tableName, "%")) {
+
+            String dbType = config.getDbType() != null ? config.getDbType().toUpperCase() : "";
+            String catalog = null;
+            String schemaPattern = null;
+            if (dbType.contains("ORACLE")) {
+                schemaPattern = config.getUsername() != null ? config.getUsername().toUpperCase() : null;
+            } else if (dbType.contains("POSTGRESQL") || dbType.contains("PG")) {
+                schemaPattern = "public";
+            } else if (dbType.contains("SQLSERVER") || dbType.contains("MSSQL")) {
+                catalog = config.getDbName();
+                schemaPattern = "dbo";
+            } else {
+                catalog = config.getDbName();
+            }
+
+            try (ResultSet rs = meta.getColumns(catalog, schemaPattern, tableName, "%")) {
                 while (rs.next()) {
                     Map<String, Object> col = new LinkedHashMap<>();
                     col.put("name", rs.getString("COLUMN_NAME"));
@@ -249,6 +339,42 @@ public class DataSourceService {
     }
 
     public Map<String, Object> previewData(Long dsId, String tableName, int limit) {
-        return executeQuery(dsId, "SELECT * FROM " + tableName + " LIMIT " + limit);
+        DsConfig config = dsConfigRepository.findById(dsId).orElse(null);
+        if (config == null) {
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("success", false);
+            result.put("error", "数据源不存在");
+            return result;
+        }
+        String sql = SqlPageWrapper.wrapFirstPage(
+                "SELECT * FROM " + SqlDialect.quoteIdent(tableName, config.getDbType()),
+                config.getDbType(), limit);
+        return executeQuery(dsId, sql, limit);
+    }
+
+    /**
+     * 测试/预览：给 SQL 加上首屏条数限制（SQL 已有分页则不改）。
+     */
+    public String applyFirstPageLimit(String sql, String dbType, int limit) {
+        return SqlPageWrapper.wrapFirstPage(sql, dbType, limit);
+    }
+
+    /**
+     * 取第一个启用的 MySQL 兼容数据源（MySQL / MariaDB / TiDB / OceanBase）。
+     */
+    public Optional<DsConfig> findFirstMysql() {
+        for (DsConfig ds : dsConfigRepository.findAll()) {
+            if (!"DB".equalsIgnoreCase(ds.getSourceType())) {
+                continue;
+            }
+            if (ds.getEnabled() != null && ds.getEnabled() == 0) {
+                continue;
+            }
+            String t = ds.getDbType() != null ? ds.getDbType().toLowerCase() : "";
+            if (t.contains("mysql") || t.contains("mariadb") || t.contains("tidb") || t.contains("oceanbase")) {
+                return Optional.of(ds);
+            }
+        }
+        return Optional.empty();
     }
 }

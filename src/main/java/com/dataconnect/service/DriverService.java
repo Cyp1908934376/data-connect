@@ -18,8 +18,12 @@ import java.io.IOException;
 import java.lang.reflect.Method;
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.sql.Driver;
+import java.sql.DriverManager;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
 
 @Service
 public class DriverService {
@@ -363,19 +367,87 @@ public class DriverService {
 
     private void addJarToClasspath(File jarFile) {
         try {
-            ClassLoader classLoader = ClassLoader.getSystemClassLoader();
-            if (classLoader instanceof URLClassLoader) {
-                Method method = URLClassLoader.class.getDeclaredMethod("addURL", URL.class);
-                method.setAccessible(true);
-                method.invoke(classLoader, jarFile.toURI().toURL());
-                log.info("Jar added to classpath: {}", jarFile.getName());
-            } else {
-                log.warn("System classloader is not URLClassLoader ({}), jar not auto-loaded: {}. Please restart.",
-                        classLoader.getClass().getName(), jarFile.getName());
-            }
+            // 所有外部驱动都使用隔离classloader加载，避免类加载冲突
+            loadDriverWithIsolatedClassLoader(jarFile);
         } catch (Exception e) {
             log.error("Failed to add jar to classpath: {}", jarFile.getName(), e);
         }
+    }
+
+    // 检查JAR是否包含已知冲突的包（Jackson、OkHttp等Spring Boot已内置的库）
+    private boolean jarContainsConflictingClasses(File jarFile) {
+        try (java.util.jar.JarFile jar = new java.util.jar.JarFile(jarFile)) {
+            java.util.Enumeration<java.util.jar.JarEntry> entries = jar.entries();
+            while (entries.hasMoreElements()) {
+                String name = entries.nextElement().getName();
+                if (name.startsWith("com/fasterxml/jackson/") ||
+                    name.startsWith("okhttp3/") ||
+                    name.startsWith("kotlin/") ||
+                    name.startsWith("okio/")) {
+                    return true;
+                }
+            }
+        } catch (Exception e) {
+            // 无法读取JAR，保守处理
+            log.debug("Cannot scan JAR for conflicts: {}", jarFile.getName());
+        }
+        return false;
+    }
+
+    // 使用隔离的子classloader加载JDBC驱动（仅加载驱动类，不污染系统classpath）
+    private void loadDriverWithIsolatedClassLoader(File jarFile) {
+        try {
+            URLClassLoader isolatedLoader = new URLClassLoader(
+                    new URL[]{jarFile.toURI().toURL()},
+                    ClassLoader.getSystemClassLoader()
+            );
+            // 通过ServiceLoader或扫描查找JDBC驱动类
+            java.util.ServiceLoader<java.sql.Driver> drivers = java.util.ServiceLoader.load(java.sql.Driver.class, isolatedLoader);
+            boolean found = false;
+            Iterator<java.sql.Driver> iter = drivers.iterator();
+            while (iter.hasNext()) {
+                try {
+                    java.sql.Driver driver = iter.next();
+                    java.sql.DriverManager.registerDriver(new IsolatedDriverDelegate(driver, isolatedLoader));
+                    log.info("JDBC driver registered via isolated classloader: {} ({})", driver.getClass().getName(), jarFile.getName());
+                    found = true;
+                } catch (Throwable e) {
+                    log.debug("Skipping driver in {}: {}", jarFile.getName(), e.getMessage());
+                }
+            }
+            if (!found) {
+                log.warn("No JDBC driver found in JAR via ServiceLoader: {}", jarFile.getName());
+                // 回退：直接添加到系统classpath
+                ClassLoader classLoader = ClassLoader.getSystemClassLoader();
+                if (classLoader instanceof URLClassLoader) {
+                    Method method = URLClassLoader.class.getDeclaredMethod("addURL", URL.class);
+                    method.setAccessible(true);
+                    method.invoke(classLoader, jarFile.toURI().toURL());
+                    log.info("Fallback: Jar added to classpath: {}", jarFile.getName());
+                }
+            }
+        } catch (Exception e) {
+            log.error("Failed to load driver with isolated classloader: {}", jarFile.getName(), e);
+        }
+    }
+
+    // 隔离驱动代理：委托给实际驱动，但使用隔离的classloader
+    private static class IsolatedDriverDelegate implements java.sql.Driver {
+        private final java.sql.Driver delegate;
+        private final URLClassLoader classLoader;
+
+        IsolatedDriverDelegate(java.sql.Driver delegate, URLClassLoader classLoader) {
+            this.delegate = delegate;
+            this.classLoader = classLoader;
+        }
+
+        @Override public java.sql.Connection connect(String url, java.util.Properties info) throws java.sql.SQLException { return delegate.connect(url, info); }
+        @Override public boolean acceptsURL(String url) throws java.sql.SQLException { return delegate.acceptsURL(url); }
+        @Override public java.sql.DriverPropertyInfo[] getPropertyInfo(String url, java.util.Properties info) throws java.sql.SQLException { return delegate.getPropertyInfo(url, info); }
+        @Override public int getMajorVersion() { return delegate.getMajorVersion(); }
+        @Override public int getMinorVersion() { return delegate.getMinorVersion(); }
+        @Override public boolean jdbcCompliant() { return delegate.jdbcCompliant(); }
+        @Override public java.util.logging.Logger getParentLogger() throws java.sql.SQLFeatureNotSupportedException { return delegate.getParentLogger(); }
     }
 
     // ——— 辅助方法 ———

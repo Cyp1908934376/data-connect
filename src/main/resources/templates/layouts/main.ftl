@@ -47,23 +47,23 @@
                 </a>
             </li>
             <li class="nav-item">
-                <a class="nav-link ${(activeMenu=='template')?string('active','')}" href="/template/list">
-                    <i class="bi bi-file-earmark-code"></i> 模板管理
+                <a class="nav-link ${(activeMenu=='visual')?string('active','')}" href="/visual/list">
+                    <i class="bi bi-bezier2"></i> 可视化模板
                 </a>
             </li>
             <li class="nav-item">
-                <a class="nav-link ${(activeMenu=='flow')?string('active','')}" href="/flow/list">
-                    <i class="bi bi-diagram-3"></i> 对接流程
-                </a>
-            </li>
-            <li class="nav-item">
-                <a class="nav-link ${(activeMenu=='mapping')?string('active','')}" href="/mapping/templateList">
-                    <i class="bi bi-link-45deg"></i> 数据对接
+                <a class="nav-link ${(activeMenu=='event')?string('active','')}" href="/event/list">
+                    <i class="bi bi-puzzle"></i> 事件管理
                 </a>
             </li>
             <li class="nav-item">
                 <a class="nav-link ${(activeMenu=='task')?string('active','')}" href="/task/list">
                     <i class="bi bi-clock-history"></i> 任务管理
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link ${(activeMenu=='publish')?string('active','')}" href="/publish/list">
+                    <i class="bi bi-cloud-upload"></i> 发布管理
                 </a>
             </li>
         </ul>

@@ -8,6 +8,7 @@ import com.dataconnect.service.FlowConfigService;
 import com.dataconnect.service.FlowExecutionService;
 import com.dataconnect.service.MappingTemplateService;
 import com.dataconnect.service.TemplateService;
+import com.dataconnect.service.VisualTemplateService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -40,6 +41,9 @@ public class FlowController {
     private MappingTemplateService mappingTemplateService;
 
     @Autowired
+    private VisualTemplateService visualTemplateService;
+
+    @Autowired
     private ExecutionLogFileService executionLogFileService;
 
     @GetMapping("/list")
@@ -65,6 +69,7 @@ public class FlowController {
         model.addAttribute("allSources", dataSourceService.listAll());
         model.addAttribute("templates", templateService.listAll());
         model.addAttribute("mappingTemplates", mappingTemplateService.listAll());
+        model.addAttribute("visualTemplates", visualTemplateService.listAll());
         model.addAttribute("pipelineConfigJson", flowExecutionService.getPipelineConfigJson(flowConfig));
         return "flow/wizard";
     }

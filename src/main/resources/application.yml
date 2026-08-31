@@ -55,7 +55,7 @@ spring:
       date_format: yyyy-MM-dd
       time_format: HH:mm:ss
       number_format: 0.######
-  # 初始化数据库
+  # 每次启动执行 schema.sql（CREATE TABLE IF NOT EXISTS），空库也能建表
   sql:
     init:
       mode: always

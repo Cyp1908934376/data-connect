@@ -1,9 +1,8 @@
 package com.dataconnect.controller;
 
 import com.dataconnect.repository.DsConfigRepository;
-import com.dataconnect.repository.FlowConfigRepository;
 import com.dataconnect.repository.TaskConfigRepository;
-import com.dataconnect.repository.TemplateRepository;
+import com.dataconnect.repository.VisualTemplateRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Controller;
@@ -22,10 +21,7 @@ public class IndexController {
     private DsConfigRepository dsConfigRepository;
 
     @Autowired
-    private TemplateRepository templateRepository;
-
-    @Autowired
-    private FlowConfigRepository flowConfigRepository;
+    private VisualTemplateRepository visualTemplateRepository;
 
     @Autowired
     private TaskConfigRepository taskConfigRepository;
@@ -119,8 +115,8 @@ public class IndexController {
     @GetMapping("/")
     public String index(Model model) {
         model.addAttribute("dsCount", dsConfigRepository.count());
-        model.addAttribute("templateCount", templateRepository.findByIsDeleted(0).size());
-        model.addAttribute("flowCount", flowConfigRepository.count());
+        model.addAttribute("visualCount", visualTemplateRepository.findByIsDeletedOrderByUpdateTimeDesc(0).size());
+        model.addAttribute("taskCount", taskConfigRepository.count());
         model.addAttribute("runningTaskCount", taskConfigRepository.findByStatus("RUNNING").size());
         return "index";
     }

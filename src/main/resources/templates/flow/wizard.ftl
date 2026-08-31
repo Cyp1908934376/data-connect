@@ -267,6 +267,13 @@ var mappingTemplateList = [
         </#list>
     </#if>
 ];
+var visualTemplateList = [
+    <#if visualTemplates??>
+        <#list visualTemplates as vt>
+            {id: ${vt.id}, name: "${vt.name?js_string}", description: "${(vt.description)!''?js_string}", version: ${(vt.version)!'1'}}<#sep>,</#sep>
+        </#list>
+    </#if>
+];
 
 // 管道配置（数组）
 var pipelineStages = [];
@@ -330,12 +337,15 @@ function renderPipeline() {
             html += '<table class="table table-sm table-borderless mb-1"><tbody>';
             for (var sti = 0; sti < stage.steps.length; sti++) {
                 var step = stage.steps[sti];
-                var stepTypeLabel = step.type === 'TEMPLATE' ? '模板' : '映射';
-                var stepTypeColor = step.type === 'TEMPLATE' ? 'info' : 'warning';
+                var stepTypeLabel = step.type === 'TEMPLATE' ? '模板' : (step.type === 'VISUAL_TEMPLATE' ? '可视化模板' : '映射');
+                var stepTypeColor = step.type === 'TEMPLATE' ? 'info' : (step.type === 'VISUAL_TEMPLATE' ? 'primary' : 'warning');
                 var stepName = '';
                 if (step.type === 'TEMPLATE') {
                     var t = findTemplate(step.templateId);
                     stepName = t ? t.name : ('模板#' + (step.templateId||'?'));
+                } else if (step.type === 'VISUAL_TEMPLATE') {
+                    var vt = findVisualTemplate(step.visualTemplateId);
+                    stepName = vt ? vt.name : ('可视化模板#' + (step.visualTemplateId||'?'));
                 } else {
                     var m = findMapping(step.mappingTemplateId);
                     stepName = m ? m.name : ('映射#' + (step.mappingTemplateId||'?'));
@@ -351,6 +361,7 @@ function renderPipeline() {
             html += '<div class="text-muted small py-1">暂无步骤</div>';
         }
         html += '<div><button type="button" class="btn btn-sm btn-outline-info me-1" onclick="addStep(' + si + ',\'TEMPLATE\')">+ 添加模板</button>';
+        html += '<button type="button" class="btn btn-sm btn-outline-primary me-1" onclick="addStep(' + si + ',\'VISUAL_TEMPLATE\')">+ 添加可视化模板</button>';
         html += '<button type="button" class="btn btn-sm btn-outline-warning" onclick="addStep(' + si + ',\'MAPPING\')">+ 添加映射</button></div>';
         html += '</div></div>';
     }
@@ -360,6 +371,7 @@ function renderPipeline() {
 
 function findTemplate(id) { for (var i=0;i<templateList.length;i++){if(templateList[i].id===id)return templateList[i];} return null; }
 function findMapping(id) { for (var i=0;i<mappingTemplateList.length;i++){if(mappingTemplateList[i].id===id)return mappingTemplateList[i];} return null; }
+function findVisualTemplate(id) { for (var i=0;i<visualTemplateList.length;i++){if(visualTemplateList[i].id===id)return visualTemplateList[i];} return null; }
 function escHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 function addStage() {
@@ -398,17 +410,26 @@ var pendingStepType = '';
 var selectedItemId = null;
 
 function showSelector(si, type) {
-    var list = type === 'TEMPLATE' ? templateList : mappingTemplateList;
-    if (list.length === 0) {
-        if (type === 'TEMPLATE') showWarning('暂无可用模板，请先在模板管理中创建');
-        else showWarning('暂无可用映射模板，请先在数据对接模板管理中创建');
-        return;
+    var list;
+    var title;
+    if (type === 'TEMPLATE') {
+        list = templateList;
+        title = '选择模板';
+        if (list.length === 0) { showWarning('暂无可用模板，请先在模板管理中创建'); return; }
+    } else if (type === 'VISUAL_TEMPLATE') {
+        list = visualTemplateList;
+        title = '选择可视化模板';
+        if (list.length === 0) { showWarning('暂无可用可视化模板，请先在可视化模板管理中创建'); return; }
+    } else {
+        list = mappingTemplateList;
+        title = '选择映射模板';
+        if (list.length === 0) { showWarning('暂无可用映射模板，请先在数据对接模板管理中创建'); return; }
     }
     pendingStageIndex = si;
     pendingStepType = type;
     selectedItemId = null;
     $('#btnConfirmSelect').prop('disabled', true);
-    $('#selectorModalTitle').text(type === 'TEMPLATE' ? '选择模板' : '选择映射模板');
+    $('#selectorModalTitle').text(title);
     renderSelectorCards(list, type);
     $('#selectorSearch').val('').trigger('input');
     $('#selectorModal').modal('show');
@@ -423,14 +444,14 @@ function renderSelectorCards(list, type) {
         html += '<div class="card-body py-2 px-3">';
         html += '<div class="d-flex justify-content-between align-items-start">';
         html += '<strong class="small">' + escHtml(item.name) + '</strong>';
-        if (type === 'TEMPLATE') {
+        if (type === 'TEMPLATE' || type === 'VISUAL_TEMPLATE') {
             html += '<span class="badge bg-info ms-1">v' + (item.version||1) + '</span>';
         }
         html += '</div>';
         if (type === 'TEMPLATE' && item.tags) {
             html += '<small class="text-muted">' + escHtml(item.tags) + '</small>';
         }
-        if (type === 'MAPPING' && item.description) {
+        if ((type === 'MAPPING' || type === 'VISUAL_TEMPLATE') && item.description) {
             html += '<br><small class="text-muted">' + escHtml(item.description) + '</small>';
         }
         html += '</div></div></div>';
@@ -451,6 +472,8 @@ function confirmSelect() {
     if (!selectedItemId) return;
     if (pendingStepType === 'TEMPLATE') {
         pipelineStages[pendingStageIndex].steps.push({type: 'TEMPLATE', templateId: selectedItemId, params: {}});
+    } else if (pendingStepType === 'VISUAL_TEMPLATE') {
+        pipelineStages[pendingStageIndex].steps.push({type: 'VISUAL_TEMPLATE', visualTemplateId: selectedItemId});
     } else {
         pipelineStages[pendingStageIndex].steps.push({type: 'MAPPING', mappingTemplateId: selectedItemId});
     }

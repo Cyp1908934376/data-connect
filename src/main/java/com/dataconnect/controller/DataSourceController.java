@@ -6,7 +6,7 @@ import com.dataconnect.service.ApiClientService;
 import com.dataconnect.service.DataSourceService;
 import com.dataconnect.service.DebugLogService;
 import com.dataconnect.service.DriverService;
-import com.dataconnect.service.TemplateService;
+import com.dataconnect.service.VisualTemplateExecutionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,10 +36,10 @@ public class DataSourceController {
     private DebugLogService debugLogService;
 
     @Autowired
-    private TemplateService templateService;
+    private DriverService driverService;
 
     @Autowired
-    private DriverService driverService;
+    private VisualTemplateExecutionService visualTemplateExecutionService;
 
     @GetMapping("/list")
     public String list(Model model) {
@@ -57,7 +57,6 @@ public class DataSourceController {
         model.addAttribute("activeMenu", "datasource");
         model.addAttribute("pageTitle", id != null ? "编辑数据源" : "新增数据源");
         model.addAttribute("config", config);
-        model.addAttribute("templates", templateService.listAll());
         model.addAttribute("dbTypes", driverService.getInstalledDbTypes());
         return "datasource/form";
     }
@@ -155,10 +154,7 @@ public class DataSourceController {
         long start = System.currentTimeMillis();
         Map<String, Object> result;
         if ("DB".equals(config.getSourceType())) {
-            boolean success = dataSourceService.testConnection(config);
-            result = new LinkedHashMap<>();
-            result.put("success", success);
-            result.put("message", success ? "连接成功" : "连接失败");
+            result = dataSourceService.testConnectionWithMessage(config);
         } else {
             result = apiClientService.testConnection(config);
         }
@@ -251,6 +247,117 @@ public class DataSourceController {
         log.info("预览数据, id={}, table={}, limit={}", id, tableName, limit);
         Map<String, Object> result = dataSourceService.previewData(id, tableName, limit);
         log.info("预览数据完成, id={}, table={}, success={}", id, tableName, result.get("success"));
+        return ApiResponse.success(result);
+    }
+
+    /**
+     * 测试查询 - 执行自定义SQL并返回结果
+     */
+    @PostMapping("/api/testQuery")
+    @ResponseBody
+    public ApiResponse<Map<String, Object>> testQuery(@RequestBody Map<String, Object> body) {
+        Long dsId = Long.valueOf(body.get("dsId").toString());
+        String sql = (String) body.get("sql");
+        int limit = body.containsKey("limit") ? Integer.parseInt(body.get("limit").toString()) : 5;
+
+        // API 数据源：直接发HTTP请求
+        if (dsId > 0) {
+            DsConfig config = dataSourceService.getById(dsId).orElse(null);
+            if (config != null && "API".equals(config.getSourceType())) {
+                return testApiQuery(body, config, limit);
+            }
+        }
+        // dsId=0 但有 apiUrl：也是API请求
+        String apiUrl = (String) body.get("apiUrl");
+        if (dsId == 0 && apiUrl != null && !apiUrl.isEmpty()) {
+            return testApiQuery(body, null, limit);
+        }
+
+        log.info("测试查询, dsId={}, sql={}", dsId, sql);
+
+        // 替换 ${param} 参数占位符为示例值（测试用）
+        String finalSql = sql;
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\$\\{([^}]+)\\}").matcher(sql);
+        while (m.find()) {
+            String paramName = m.group(1);
+            finalSql = finalSql.replace("${" + paramName + "}", "1");
+        }
+
+        // 去掉末尾分号
+        finalSql = finalSql.replaceAll(";+\\s*$", "");
+
+        DsConfig config = dataSourceService.getById(dsId).orElse(null);
+        if (config != null) {
+            finalSql = dataSourceService.applyFirstPageLimit(finalSql, config.getDbType(), limit);
+        }
+
+        Map<String, Object> result = dataSourceService.executeQuery(dsId, finalSql, limit);
+        if (result.get("rows") instanceof java.util.List) {
+            java.util.List<?> rows = (java.util.List<?>) result.get("rows");
+            if (rows.size() > limit) {
+                result.put("rows", new java.util.ArrayList<>(rows.subList(0, limit)));
+                result.put("rowCount", limit);
+            }
+        }
+        log.info("测试查询完成, dsId={}, success={}", dsId, result.get("success"));
+        return ApiResponse.success(result);
+    }
+
+    private ApiResponse<Map<String, Object>> testApiQuery(Map<String, Object> body, DsConfig config, int limit) {
+        String apiUrl = (String) body.get("apiUrl");
+        if ((apiUrl == null || apiUrl.isEmpty()) && config != null) {
+            apiUrl = config.getApiUrl();
+        }
+        Map<String, Object> step = new java.util.LinkedHashMap<>();
+        step.put("apiUrl", apiUrl);
+        step.put("apiMethod", body.getOrDefault("apiMethod", config != null ? config.getApiMethod() : "GET"));
+        step.put("apiHeaders", body.getOrDefault("apiHeaders", config != null ? config.getApiHeaders() : ""));
+        step.put("apiBody", body.getOrDefault("apiBody", config != null ? config.getApiBody() : ""));
+        step.put("apiTimeout", body.getOrDefault("timeout",
+                body.getOrDefault("apiTimeout", config != null ? config.getApiTimeout() : 180)));
+        step.put("apiRetryTimes", body.getOrDefault("apiRetryTimes",
+                config != null && config.getApiRetryTimes() != null ? config.getApiRetryTimes() : 3));
+        step.put("apiRetryInterval", body.getOrDefault("apiRetryInterval",
+                config != null && config.getApiRetryInterval() != null ? config.getApiRetryInterval() : 1000));
+        step.put("tokenUrl", body.getOrDefault("tokenUrl", ""));
+        step.put("tokenMethod", body.getOrDefault("tokenMethod", "POST"));
+        step.put("tokenHeaders", body.getOrDefault("tokenHeaders", ""));
+        step.put("tokenBody", body.getOrDefault("tokenBody", ""));
+        step.put("tokenExtractPath", body.getOrDefault("tokenExtractPath", "result.access_token"));
+        step.put("tokenQueryParam", body.getOrDefault("tokenQueryParam", "access_token"));
+        step.put("apiListPath", body.getOrDefault("apiListPath", ""));
+        step.put("batchSize", 0);
+
+        log.info("API测试请求: {} {}", step.get("apiMethod"), apiUrl);
+        Map<String, Object> result = new java.util.LinkedHashMap<>();
+        long start = System.currentTimeMillis();
+        try {
+            com.dataconnect.component.DataPacket packet = visualTemplateExecutionService.previewApiDataSource(step, null);
+            result.put("duration", System.currentTimeMillis() - start);
+            if (packet == null || !packet.isSuccess()) {
+                result.put("success", false);
+                result.put("error", packet != null ? packet.getErrorMessage() : "API测试失败");
+                return ApiResponse.success(result);
+            }
+            java.util.List<java.util.Map<String, Object>> rows = packet.getRows() != null
+                    ? packet.getRows() : new java.util.ArrayList<>();
+            if (limit > 0 && rows.size() > limit) {
+                rows = new java.util.ArrayList<>(rows.subList(0, limit));
+            }
+            result.put("success", true);
+            result.put("rows", rows);
+            result.put("rowCount", rows.size());
+            if (!rows.isEmpty()) {
+                result.put("columns", new java.util.ArrayList<>(rows.get(0).keySet()));
+            } else {
+                result.put("columns", new java.util.ArrayList<String>());
+            }
+        } catch (Exception e) {
+            log.error("API测试请求失败", e);
+            result.put("success", false);
+            result.put("error", e.getMessage());
+            result.put("duration", System.currentTimeMillis() - start);
+        }
         return ApiResponse.success(result);
     }
 }

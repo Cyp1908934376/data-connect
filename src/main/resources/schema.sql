@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS ds_config (
     api_type VARCHAR(20) DEFAULT '',            -- HTTP/HTTPS
     api_method VARCHAR(10) DEFAULT 'GET',       -- GET/POST/PUT/DELETE
     api_url VARCHAR(1000) DEFAULT '',
-    api_timeout INT DEFAULT 30,
+    api_timeout INT DEFAULT 180,
     api_retry_times INT DEFAULT 3,
     api_retry_interval INT DEFAULT 1000,
     api_headers TEXT DEFAULT '',                -- JSON格式
@@ -96,13 +96,15 @@ CREATE TABLE IF NOT EXISTS flow_config (
 CREATE TABLE IF NOT EXISTS task_config (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(200) NOT NULL,
-    flow_config_id BIGINT NOT NULL,
+    flow_config_id BIGINT DEFAULT 0,            -- 关联对接流程；可视化模板任务为 0
     cron_expr VARCHAR(100) DEFAULT '',          -- Cron表达式
     status VARCHAR(20) DEFAULT 'STOPPED',       -- RUNNING/PAUSED/STOPPED
     retry_times INT DEFAULT 3,
     retry_interval INT DEFAULT 60,              -- 重试间隔(秒)
     timeout INT DEFAULT 3600,                   -- 超时时间(秒)
     notify_url VARCHAR(500) DEFAULT '',
+    task_type VARCHAR(20) DEFAULT 'FLOW',       -- FLOW=对接流程 / VISUAL=可视化模板
+    visual_template_id BIGINT DEFAULT 0,        -- 可视化模板 ID
     create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -169,6 +171,8 @@ CREATE TABLE IF NOT EXISTS template_snippet (
 
 -- 索引
 ALTER TABLE ds_config ADD COLUMN IF NOT EXISTS table_name VARCHAR(200) DEFAULT '';
+ALTER TABLE ds_config ADD COLUMN IF NOT EXISTS table_names VARCHAR(2000) DEFAULT '';
+ALTER TABLE ds_config ADD COLUMN IF NOT EXISTS custom_query_sql TEXT DEFAULT '';
 ALTER TABLE ds_config ADD COLUMN IF NOT EXISTS api_mode VARCHAR(20) DEFAULT 'SINGLE';
 ALTER TABLE ds_config ADD COLUMN IF NOT EXISTS template_id BIGINT DEFAULT 0;
 ALTER TABLE ds_config ADD COLUMN IF NOT EXISTS api_chain_config TEXT DEFAULT '';
@@ -186,11 +190,154 @@ ALTER TABLE column_config ADD COLUMN IF NOT EXISTS column_type VARCHAR(20) DEFAU
 
 ALTER TABLE mapping_template ADD COLUMN IF NOT EXISTS push_column_config_id BIGINT DEFAULT 0;
 
+ALTER TABLE task_config ADD COLUMN IF NOT EXISTS task_type VARCHAR(20) DEFAULT 'FLOW';
+ALTER TABLE task_config ADD COLUMN IF NOT EXISTS visual_template_id BIGINT DEFAULT 0;
+ALTER TABLE task_config ALTER COLUMN flow_config_id SET DEFAULT 0;
+
 CREATE INDEX IF NOT EXISTS idx_ds_config_source_type ON ds_config(source_type);
 CREATE INDEX IF NOT EXISTS idx_ds_config_enabled ON ds_config(enabled);
 CREATE INDEX IF NOT EXISTS idx_template_category_id ON template(category_id);
 CREATE INDEX IF NOT EXISTS idx_template_is_deleted ON template(is_deleted);
 CREATE INDEX IF NOT EXISTS idx_template_version_tid ON template_version(template_id);
 CREATE INDEX IF NOT EXISTS idx_task_config_status ON task_config(status);
+CREATE INDEX IF NOT EXISTS idx_task_config_visual ON task_config(visual_template_id);
 CREATE INDEX IF NOT EXISTS idx_task_execution_log_tid ON task_execution_log(task_id);
 CREATE INDEX IF NOT EXISTS idx_debug_log_ds_id ON debug_log(ds_config_id);
+
+-- ========================================
+-- 发布管理模块 (新路由: /publish)
+-- ========================================
+
+-- 发布配置表
+CREATE TABLE IF NOT EXISTS publish_config (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(200) NOT NULL,
+    description VARCHAR(500) DEFAULT '',
+    flow_config_id BIGINT DEFAULT 0,           -- 关联对接流程ID
+    port INT NOT NULL,                         -- 分配的端口号
+    status VARCHAR(20) DEFAULT 'STOPPED',      -- RUNNING/STOPPED/ERROR
+    api_path VARCHAR(200) DEFAULT '/api/data', -- API路径
+    auth_type VARCHAR(20) DEFAULT 'NONE',      -- NONE/TOKEN/BASIC
+    auth_config TEXT DEFAULT '',               -- 认证配置JSON
+    rate_limit INT DEFAULT 0,                  -- 限流（每秒请求数，0不限）
+    cache_ttl INT DEFAULT 0,                   -- 缓存时间（秒，0不缓存）
+    last_start_time TIMESTAMP NULL,
+    last_error TEXT DEFAULT '',
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 发布执行日志表
+CREATE TABLE IF NOT EXISTS publish_execution_log (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    publish_id BIGINT NOT NULL,
+    request_path VARCHAR(500) DEFAULT '',
+    request_params TEXT DEFAULT '',
+    response_status INT DEFAULT 0,
+    response_body TEXT DEFAULT '',
+    duration BIGINT DEFAULT 0,
+    client_ip VARCHAR(50) DEFAULT '',
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ========================================
+-- 可视化模板模块 (新路由: /visual)
+-- ========================================
+
+-- 组件定义表
+CREATE TABLE IF NOT EXISTS component_definition (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    category VARCHAR(50) NOT NULL,             -- FLOW/DATA/API/DB/OUTPUT/TRANSFORM
+    icon VARCHAR(50) DEFAULT '',
+    description VARCHAR(500) DEFAULT '',
+    input_schema TEXT DEFAULT '',              -- 输入端口定义JSON
+    output_schema TEXT DEFAULT '',             -- 输出端口定义JSON
+    config_schema TEXT DEFAULT '',             -- 配置项定义JSON
+    execution_type VARCHAR(50) NOT NULL,       -- 执行器类型标识
+    script_template TEXT DEFAULT '',           -- 脚本模板
+    sort_order INT DEFAULT 0,
+    enabled TINYINT DEFAULT 1,
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 可视化模板表
+CREATE TABLE IF NOT EXISTS visual_template (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(200) NOT NULL,
+    description VARCHAR(500) DEFAULT '',
+    category_id BIGINT DEFAULT 0,
+    event_type VARCHAR(50) NOT NULL,           -- 事件类型：TRIGGER/DATA_SOURCE/PROCESS/OUTPUT/CONTROL
+    event_config TEXT DEFAULT '',              -- 事件配置JSON
+    call_templates TEXT DEFAULT '',            -- 调用的模板列表JSON
+    canvas_config TEXT DEFAULT '',             -- 画布配置JSON（兼容旧字段）
+    input_params TEXT DEFAULT '',              -- 输入参数定义JSON
+    output_params TEXT DEFAULT '',             -- 输出参数定义JSON
+    builtin_code VARCHAR(50) DEFAULT NULL,     -- 系统内置模板标识，非空则不可删除
+    version INT DEFAULT 1,
+    is_deleted TINYINT DEFAULT 0,
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 可视化模板版本表
+CREATE TABLE IF NOT EXISTS visual_template_version (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    template_id BIGINT NOT NULL,
+    version INT NOT NULL,
+    canvas_config TEXT DEFAULT '',
+    change_log VARCHAR(500) DEFAULT '',
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 可视化模板分类表（复用模板分类或新建）
+CREATE TABLE IF NOT EXISTS visual_template_category (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    parent_id BIGINT DEFAULT 0,
+    sort_order INT DEFAULT 0,
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 索引
+CREATE INDEX IF NOT EXISTS idx_publish_config_status ON publish_config(status);
+CREATE INDEX IF NOT EXISTS idx_publish_config_flow ON publish_config(flow_config_id);
+CREATE INDEX IF NOT EXISTS idx_publish_log_publish_id ON publish_execution_log(publish_id);
+CREATE INDEX IF NOT EXISTS idx_component_def_category ON component_definition(category);
+CREATE INDEX IF NOT EXISTS idx_component_def_enabled ON component_definition(enabled);
+CREATE INDEX IF NOT EXISTS idx_visual_template_category ON visual_template(category_id);
+CREATE INDEX IF NOT EXISTS idx_visual_template_deleted ON visual_template(is_deleted);
+CREATE INDEX IF NOT EXISTS idx_visual_template_version_tid ON visual_template_version(template_id);
+
+ALTER TABLE visual_template ADD COLUMN IF NOT EXISTS builtin_code VARCHAR(50) DEFAULT NULL;
+CREATE INDEX IF NOT EXISTS idx_visual_template_builtin ON visual_template(builtin_code);
+
+-- 发布管理支持绑定可视化模板
+ALTER TABLE publish_config ADD COLUMN IF NOT EXISTS visual_template_id BIGINT DEFAULT 0;
+ALTER TABLE publish_config ALTER COLUMN flow_config_id SET DEFAULT 0;
+
+-- ========================================
+-- 事件管理模块 (新路由: /event)
+-- ========================================
+
+-- 事件定义表
+CREATE TABLE IF NOT EXISTS event_definition (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(200) NOT NULL,
+    code VARCHAR(100) NOT NULL UNIQUE,
+    category VARCHAR(50) DEFAULT '自定义',
+    description VARCHAR(500) DEFAULT '',
+    icon VARCHAR(50) DEFAULT 'bi-lightning',
+    input_schema TEXT DEFAULT '',
+    output_schema TEXT DEFAULT '',
+    handler_type VARCHAR(20) DEFAULT 'GROOVY',
+    handler_config TEXT DEFAULT '',
+    is_builtin TINYINT DEFAULT 0,
+    is_enabled TINYINT DEFAULT 1,
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_event_definition_code ON event_definition(code);
+CREATE INDEX IF NOT EXISTS idx_event_definition_category ON event_definition(category);
+CREATE INDEX IF NOT EXISTS idx_event_definition_enabled ON event_definition(is_enabled);
